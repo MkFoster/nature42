@@ -1,0 +1,26 @@
+/* Legal and info pages styling - placeholder */
+body {
+    font-family: 'Courier New', monospace;
+    background-color: #000;
+    color: #0f0;
+    padding: 20px;
+}
+
+.page-container {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+h1 {
+    border-bottom: 1px solid #0f0;
+    padding-bottom: 10px;
+}
+
+a {
+    color: #0f0;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}

@@ -1,0 +1,16 @@
+# Web Framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# Strands Agent SDK
+strands-agents==0.1.0
+strands-agents-tools==0.1.0
+
+# Testing
+hypothesis==6.122.3
+pytest==8.3.4
+pytest-asyncio==0.24.0
+
+# Utilities
+python-dotenv==1.0.1
+pydantic==2.10.6
