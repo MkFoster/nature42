@@ -19,9 +19,16 @@ run:
       value: "1"
     - name: AWS_REGION
       value: "us-east-1"
+    - name: STRANDS_MODEL_PROVIDER
+      value: "bedrock"
     - name: STRANDS_MODEL_ID
       value: "anthropic.claude-sonnet-4-20250514-v1:0"
     - name: STRANDS_TEMPERATURE
       value: "0.7"
     - name: STRANDS_MAX_TOKENS
       value: "4096"
+  secrets:
+    - name: AWS_ACCESS_KEY_ID
+      value-from: arn:aws:secretsmanager:us-east-1:745851906253:secret:nature42-sec-iJoxB7:AWS_ACCESS_KEY_ID::
+    - name: AWS_SECRET_ACCESS_KEY
+      value-from: arn:aws:secretsmanager:us-east-1:745851906253:secret:nature42-sec-iJoxB7:AWS_SECRET_ACCESS_KEY::
