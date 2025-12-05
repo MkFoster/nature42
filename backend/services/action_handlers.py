@@ -92,7 +92,7 @@ class ActionHandlers:
         from backend.services.content_generator import ContentGenerator
         import asyncio
         
-        generator = ContentGenerator(self.game_state)
+        generator = ContentGenerator()
         
         try:
             # Generate the new location
@@ -644,49 +644,91 @@ Your goal: Collect all six keys from the six door worlds and unlock the vault.""
     
     async def handle_hint(self) -> ActionResult:
         """
-        Handle hint requests from the player.
+        Handle hint requests using AI to provide contextual, helpful hints.
         
-        Provides contextual hints based on current location and progress.
-        
-        Implements Requirements 14.1, 14.2, 14.3, 14.4:
-        - Hints available at any time
-        - Adjust specificity based on progress
-        - Consider keys collected
-        - Provide helpful guidance without spoiling
+        AI considers:
+        - Current location and what's there
+        - What the player has done so far
+        - What items they're carrying
+        - Keys collected
+        - Recent interactions
         
         Returns:
             ActionResult with contextual hint
         """
-        keys_collected = len(self.game_state.keys_collected)
-        current_location = self.game_state.player_location
-        current_door = self.game_state.current_door
+        import os
+        from strands import Agent
+        from strands.models import BedrockModel
         
-        # In forest clearing
-        if current_location == "forest_clearing":
-            if keys_collected == 0:
-                hint = "You're in the forest clearing with six doors. Each door leads to a different world where you can find a key. Try opening one of the doors (e.g., 'open door 1') to begin your quest!"
-            elif keys_collected < 6:
-                remaining = 6 - keys_collected
-                hint = f"You've collected {keys_collected} key{'s' if keys_collected != 1 else ''}! You need {remaining} more. Try exploring the doors you haven't opened yet. Each door world contains one key."
-            else:
-                hint = "You have all six keys! Now you need to insert them into the vault. Try 'insert key' to place a key in the vault."
-        
-        # In a door world
-        elif current_door is not None:
-            door_num = current_door
-            if door_num in self.game_state.keys_collected:
-                hint = f"You've already collected the key from this world (Door {door_num}). You can return to the forest clearing by typing 'back' or 'return to clearing'."
-            else:
-                hint = f"You're exploring the world behind Door {door_num}. The key is hidden somewhere in this world. Try:\n\n• LOOK AROUND - Get your bearings\n• EXAMINE objects - Look closely at interesting things\n• EXPLORE different areas - Move through exits\n• TALK to NPCs - They might have information\n• SOLVE puzzles - Keys are often rewards for solving challenges\n\nThe key won't just be lying around - you'll need to interact with this world to find it!"
-        
-        # In some other location
-        else:
-            hint = "Explore your surroundings. Try examining objects, talking to people, or looking for exits to new areas. Keys are usually found by solving puzzles or completing challenges."
-        
-        return ActionResult(
-            success=True,
-            message=hint
+        # Get current location
+        current_location = self.game_state.visited_locations.get(
+            self.game_state.player_location
         )
+        
+        location_desc = current_location.description if current_location else "Unknown location"
+        inventory_list = "\n".join([f"- {item.name}" for item in self.game_state.inventory]) if self.game_state.inventory else "Empty"
+        
+        # Build context about recent actions
+        recent_context = ""
+        if self.game_state.decision_history:
+            recent_decisions = self.game_state.decision_history[-3:]
+            recent_context = "\n\nRecent actions:\n" + "\n".join([f"- {d.description}" for d in recent_decisions])
+        
+        # Use AI to generate contextual hint
+        model_id = os.getenv("STRANDS_MODEL_ID", "anthropic.claude-sonnet-4-20250514-v1:0")
+        region_name = os.getenv("AWS_REGION", "us-east-1")
+        
+        model = BedrockModel(
+            model_id=model_id,
+            region_name=region_name,
+            temperature=0.7,
+            max_tokens=512
+        )
+        
+        system_prompt = f"""You are the game master for Nature42. Provide a helpful hint.
+
+CURRENT LOCATION:
+{location_desc}
+
+PLAYER'S INVENTORY:
+{inventory_list}
+
+GAME PROGRESS:
+- Keys collected: {len(self.game_state.keys_collected)}/6
+- Current door world: {self.game_state.current_door if self.game_state.current_door else "Forest Clearing"}
+{recent_context}
+
+Provide a contextual hint that:
+1. Acknowledges what the player has done
+2. Suggests a specific next step based on the current situation
+3. Doesn't spoil the solution but points them in the right direction
+4. References specific objects or NPCs in the current location
+
+Keep it concise (2-3 sentences) and helpful."""
+
+        agent = Agent(model=model, system_prompt=system_prompt)
+        
+        try:
+            # Run synchronously in executor
+            import asyncio
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: agent("Give the player a helpful hint")
+            )
+            
+            hint = str(response).strip()
+            
+            return ActionResult(
+                success=True,
+                message=hint
+            )
+        except Exception as e:
+            # Fallback
+            return ActionResult(
+                success=True,
+                message="Try examining objects around you, talking to NPCs, or exploring different areas. The key is hidden somewhere in this world!"
+            )
     
     async def handle_talk(self, npc_target: str) -> ActionResult:
         """

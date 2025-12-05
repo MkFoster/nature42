@@ -20,7 +20,6 @@ from .difficulty import (
     get_puzzle_complexity,
     get_world_size,
     get_hint_generosity,
-    get_required_virtues,
     get_location_count_range,
     is_difficulty_increasing
 )
@@ -54,7 +53,6 @@ __all__ = [
     'get_puzzle_complexity',
     'get_world_size',
     'get_hint_generosity',
-    'get_required_virtues',
     'get_location_count_range',
     'is_difficulty_increasing',
     # Pop culture references

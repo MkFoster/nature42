@@ -664,6 +664,8 @@ Player's command: {command}"""
         """
         Validate using an item based on inventory and context.
         
+        Simplified: Just check if inventory is empty, let AI handle semantic matching.
+        
         Implements Requirement 12.1: Consider inventory and location
         Implements Requirement 12.4: Allow creative interpretations
         """
@@ -674,26 +676,18 @@ Player's command: {command}"""
                 context_info=context_info
             )
         
-        # Check if item is in inventory
-        item_names = [item.name.lower() for item in self.game_state.inventory]
-        if target.lower() not in item_names:
-            if self.game_state.inventory:
-                inventory_items = ", ".join(item.name for item in self.game_state.inventory)
-                reason = f"You don't have a '{target}' to use. You are carrying: {inventory_items}."
-            else:
-                reason = f"You don't have a '{target}' to use. Your inventory is empty."
-            
+        # Just check if inventory is empty - let AI handle semantic matching
+        if not self.game_state.inventory:
             return ValidationResult(
                 is_valid=False,
-                reason=reason,
+                reason="Your inventory is empty.",
                 context_info=context_info
             )
         
-        # Item exists in inventory - allow creative usage
-        # The content generator will determine if the usage makes sense
+        # Player has items - let AI handle semantic matching and usage
         return ValidationResult(
             is_valid=True,
-            reason="Item usage will be evaluated",
+            reason="Item usage will be evaluated by AI",
             context_info=context_info
         )
     

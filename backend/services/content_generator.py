@@ -74,7 +74,7 @@ CONTENT GUIDELINES (Age 13+):
 - No mature themes (drugs, alcohol abuse, etc.)
 - Maintain a mysterious yet humorous tone
 - Include age-appropriate pop culture references
-- Focus on adventure, puzzles, and character virtues
+- Focus on adventure, puzzles, and creative problem-solving
 """
         
         # Location cache for consistency (Requirement 2.4)
@@ -212,7 +212,6 @@ LOCATION REQUIREMENTS:
 - Door number: {door_number}
 - Difficulty: {difficulty['puzzle_complexity']}
 - World size: {difficulty['world_size']}
-- Required virtues: {', '.join(difficulty['required_virtues'])}
 - Keys collected so far: {keys_collected}/6{history_context}
 
 STYLE:

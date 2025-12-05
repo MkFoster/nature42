@@ -14,43 +14,37 @@ DIFFICULTY_CURVE: Dict[int, Dict[str, Any]] = {
         "target_time_minutes": 7.5,  # 5-10 min range
         "puzzle_complexity": "simple",
         "world_size": "small",  # 3-5 locations
-        "hint_generosity": "high",
-        "required_virtues": ["kindness"]
+        "hint_generosity": "high"
     },
     2: {
         "target_time_minutes": 15,
         "puzzle_complexity": "moderate",
         "world_size": "medium",  # 5-8 locations
-        "hint_generosity": "high",
-        "required_virtues": ["curiosity"]
+        "hint_generosity": "high"
     },
     3: {
         "target_time_minutes": 30,
         "puzzle_complexity": "moderate",
         "world_size": "medium",
-        "hint_generosity": "medium",
-        "required_virtues": ["courage"]
+        "hint_generosity": "medium"
     },
     4: {
         "target_time_minutes": 45,
         "puzzle_complexity": "complex",
         "world_size": "large",  # 8-12 locations
-        "hint_generosity": "medium",
-        "required_virtues": ["gratitude"]
+        "hint_generosity": "medium"
     },
     5: {
         "target_time_minutes": 75,
         "puzzle_complexity": "complex",
         "world_size": "large",
-        "hint_generosity": "low",
-        "required_virtues": ["kindness", "curiosity"]
+        "hint_generosity": "low"
     },
     6: {
         "target_time_minutes": 150,  # 2-3 hours
         "puzzle_complexity": "very_complex",
         "world_size": "very_large",  # 12-20 locations
-        "hint_generosity": "minimal",
-        "required_virtues": ["kindness", "curiosity", "courage", "gratitude"]
+        "hint_generosity": "minimal"
     }
 }
 
@@ -128,20 +122,6 @@ def get_hint_generosity(door_number: int) -> str:
     """
     settings = get_difficulty_settings(door_number)
     return settings["hint_generosity"]
-
-
-def get_required_virtues(door_number: int) -> List[str]:
-    """
-    Get required virtues for a door.
-    
-    Args:
-        door_number: Door number (1-6)
-        
-    Returns:
-        List of required virtues
-    """
-    settings = get_difficulty_settings(door_number)
-    return settings["required_virtues"].copy()
 
 
 def get_location_count_range(door_number: int) -> tuple[int, int]:
