@@ -29,6 +29,6 @@ run:
       value: "4096"
   secrets:
     - name: AWS_ACCESS_KEY_ID
-      value-from: arn:aws:secretsmanager:us-east-1:745851906253:secret:nature42-sec-iJoxB7:AWS_ACCESS_KEY_ID::
+      value-from: "arn:aws:secretsmanager:us-east-1:745851906253:secret:nature42-sec-iJoxB7:AWS_ACCESS_KEY_ID::"
     - name: AWS_SECRET_ACCESS_KEY
-      value-from: arn:aws:secretsmanager:us-east-1:745851906253:secret:nature42-sec-iJoxB7:AWS_SECRET_ACCESS_KEY::
+      value-from: "arn:aws:secretsmanager:us-east-1:745851906253:secret:nature42-sec-iJoxB7:AWS_SECRET_ACCESS_KEY::"
