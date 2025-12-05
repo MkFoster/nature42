@@ -3,28 +3,92 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nature42 - Text Adventure</title>
+    <title>Nature42 - A Text Adventure</title>
     <link rel="stylesheet" href="/static/css/terminal.css">
     <link rel="stylesheet" href="/static/css/themes.css">
 </head>
 <body>
-    <div id="terminal-container">
-        <div id="terminal-output"></div>
-        <div id="terminal-input-line">
-            <span class="prompt">&gt;</span>
-            <input type="text" id="terminal-input" autocomplete="off" autofocus>
+    <!-- Welcome Modal -->
+    <div id="welcome-modal" class="modal">
+        <div class="modal-content">
+            <div class="logo-container">
+                <pre class="ascii-logo">
+███╗   ██╗ █████╗ ████████╗██╗   ██╗██████╗ ███████╗    ██╗  ██╗██████╗ 
+████╗  ██║██╔══██╗╚══██╔══╝██║   ██║██╔══██╗██╔════╝    ██║  ██║╚════██╗
+██╔██╗ ██║███████║   ██║   ██║   ██║██████╔╝█████╗      ███████║ █████╔╝
+██║╚██╗██║██╔══██║   ██║   ██║   ██║██╔══██╗██╔══╝      ╚════██║██╔═══╝ 
+██║ ╚████║██║  ██║   ██║   ╚██████╔╝██║  ██║███████╗         ██║███████╗
+╚═╝  ╚═══╝╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚══════╝         ╚═╝╚══════╝
+                </pre>
+            </div>
+            <div class="modal-buttons">
+                <button id="new-game-btn" class="modal-btn">New Game</button>
+                <button id="continue-game-btn" class="modal-btn" style="display: none;">Continue Existing Game</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Game Container -->
+    <div id="game-container">
+        <!-- Left side: Terminal -->
+        <div id="terminal-container">
+            <div id="terminal-header">
+                <span class="terminal-title">NATURE42</span>
+            </div>
+            
+            <div id="terminal-output" role="log" aria-live="polite" aria-atomic="false">
+                <!-- Game output will be displayed here -->
+            </div>
+            
+            <div id="terminal-input-container">
+                <span class="prompt">&gt;</span>
+                <input type="text" id="terminal-input" autocomplete="off" spellcheck="false" aria-label="Game command input">
+            </div>
+            
+            <div id="image-display" class="hidden">
+                <img id="location-image" alt="Location visualization" />
+            </div>
+        </div>
+
+        <!-- Right side: Inventory Panel -->
+        <div id="inventory-panel">
+            <div class="panel-header">
+                <h2>Inventory</h2>
+            </div>
+            <div id="inventory-content">
+                <div class="inventory-empty">
+                    <p>Your inventory is empty</p>
+                </div>
+                <div id="inventory-items">
+                    <!-- Inventory items will be displayed here -->
+                </div>
+            </div>
+            <div class="panel-stats">
+                <div class="stat-item">
+                    <span class="stat-label">Keys Collected:</span>
+                    <span id="keys-count" class="stat-value">0/6</span>
+                </div>
+            </div>
         </div>
     </div>
     
-    <footer>
-        <a href="/privacy">Privacy Policy</a> | 
-        <a href="/terms">User Agreement</a> | 
-        <a href="/about">About</a>
-        <span class="copyright">© 2025</span>
+    <footer id="terminal-footer">
+        <div class="footer-links">
+            <a href="/privacy">Privacy Policy</a>
+            <span class="separator">|</span>
+            <a href="/terms">User Agreement</a>
+            <span class="separator">|</span>
+            <a href="/about">About</a>
+        </div>
+        <div class="footer-copyright">
+            © 2025
+        </div>
     </footer>
-
-    <script src="/static/js/storage.js"></script>
+    
+    <script src="/static/js/accessibility.js"></script>
     <script src="/static/js/terminal.js"></script>
+    <script src="/static/js/streaming.js"></script>
+    <script src="/static/js/storage.js"></script>
     <script src="/static/js/game-client.js"></script>
 </body>
 </html>

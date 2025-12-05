@@ -1,26 +1,135 @@
-/* Legal and info pages styling - placeholder */
+/* Styles for legal and informational pages */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
 body {
-    font-family: 'Courier New', monospace;
+    font-family: 'Courier New', Courier, monospace;
     background-color: #000;
-    color: #0f0;
-    padding: 20px;
+    color: #a855ff;
+    line-height: 1.6;
 }
 
 .page-container {
-    max-width: 800px;
+    max-width: 900px;
     margin: 0 auto;
+    padding: 40px 20px;
 }
 
-h1 {
-    border-bottom: 1px solid #0f0;
-    padding-bottom: 10px;
+header {
+    margin-bottom: 40px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid currentColor;
 }
 
-a {
-    color: #0f0;
+header h1 {
+    font-size: 2em;
+    margin-bottom: 15px;
+    letter-spacing: 2px;
+}
+
+header nav a {
+    color: inherit;
     text-decoration: none;
+    padding: 8px 16px;
+    border: 1px solid currentColor;
+    display: inline-block;
+    transition: all 0.2s;
+}
+
+header nav a:hover {
+    background: currentColor;
+    color: #000;
+}
+
+main {
+    margin-bottom: 40px;
+}
+
+section {
+    margin-bottom: 40px;
+}
+
+h2 {
+    font-size: 1.5em;
+    margin-bottom: 15px;
+    letter-spacing: 1px;
+}
+
+h3 {
+    font-size: 1.2em;
+    margin-bottom: 10px;
+    margin-top: 20px;
+}
+
+p {
+    margin-bottom: 15px;
+}
+
+ul {
+    margin-left: 30px;
+    margin-bottom: 15px;
+}
+
+li {
+    margin-bottom: 8px;
+}
+
+strong {
+    font-weight: bold;
+}
+
+footer {
+    padding-top: 20px;
+    border-top: 2px solid currentColor;
+    text-align: center;
+    opacity: 0.7;
+}
+
+/* Links */
+a {
+    color: inherit;
+    transition: opacity 0.2s;
 }
 
 a:hover {
-    text-decoration: underline;
+    opacity: 0.7;
+}
+
+a:focus {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .page-container {
+        padding: 20px 15px;
+    }
+    
+    header h1 {
+        font-size: 1.5em;
+    }
+    
+    h2 {
+        font-size: 1.3em;
+    }
+    
+    h3 {
+        font-size: 1.1em;
+    }
+}
+
+/* Print styles */
+@media print {
+    body {
+        background: white;
+        color: black;
+    }
+    
+    header nav {
+        display: none;
+    }
 }

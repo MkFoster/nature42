@@ -2,6 +2,8 @@
 Command processing API endpoint for Nature42.
 
 Handles player commands with streaming responses using Strands Agent SDK.
+
+Implements Requirements 11.3, 11.4: Error handling and retry logic
 """
 
 import os
@@ -14,7 +16,16 @@ from strands import Agent
 from strands.models import BedrockModel
 
 from backend.services.command_processor import CommandProcessor
-from backend.models.game_state import GameState
+from backend.models.game_state import GameState, LocationData, Item, Decision
+from backend.utils.error_handling import (
+    StrandsUnavailableError,
+    CommandProcessingError,
+    StateValidationError,
+    retry_with_backoff,
+    RetryConfig,
+    format_error_response,
+    logger
+)
 
 router = APIRouter()
 
@@ -29,6 +40,8 @@ async def generate_response(command: str, game_state: dict) -> AsyncGenerator[st
     """
     Generate streaming response for a player command.
     
+    Implements Requirements 11.3, 11.4: Error handling with retry logic
+    
     Args:
         command: Player's text command
         game_state: Current game state as dictionary
@@ -42,12 +55,26 @@ async def generate_response(command: str, game_state: dict) -> AsyncGenerator[st
         temperature = float(os.getenv("STRANDS_TEMPERATURE", "0.7"))
         max_tokens = int(os.getenv("STRANDS_MAX_TOKENS", "4096"))
         
-        # Create Bedrock model
-        model = BedrockModel(
-            model_id=model_id,
-            temperature=temperature,
-            max_tokens=max_tokens
+        # Create Bedrock model with retry logic
+        @retry_with_backoff(
+            config=RetryConfig(max_attempts=3, initial_delay=1.0),
+            exceptions=(Exception,)
         )
+        async def create_model():
+            try:
+                return BedrockModel(
+                    model_id=model_id,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+            except Exception as e:
+                logger.error(f"Failed to create Bedrock model: {e}")
+                raise StrandsUnavailableError(
+                    "Unable to connect to AI service",
+                    details={"error": str(e)}
+                )
+        
+        model = await create_model()
         
         # Build system prompt with game context
         system_prompt = build_system_prompt(game_state)
@@ -59,25 +86,35 @@ async def generate_response(command: str, game_state: dict) -> AsyncGenerator[st
             callback_handler=None  # Required for stream_async
         )
         
-        # Stream agent response
-        async for event in agent.stream_async(command):
-            # Send text chunks to client
-            if "data" in event:
-                yield f"data: {json.dumps({'type': 'text', 'content': event['data']})}\n\n"
-            
-            # Send tool usage events
-            if "current_tool_use" in event:
-                tool_name = event["current_tool_use"].get("name")
-                if tool_name:
-                    yield f"data: {json.dumps({'type': 'tool', 'tool_name': tool_name})}\n\n"
-            
-            # Send final result
-            if "result" in event:
-                yield f"data: {json.dumps({'type': 'done', 'result': event['result']})}\n\n"
+        # Stream agent response with error handling
+        try:
+            async for event in agent.stream_async(command):
+                # Send text chunks to client
+                if "data" in event:
+                    yield f"data: {json.dumps({'type': 'text', 'content': event['data']})}\n\n"
                 
+                # Send tool usage events
+                if "current_tool_use" in event:
+                    tool_name = event["current_tool_use"].get("name")
+                    if tool_name:
+                        yield f"data: {json.dumps({'type': 'tool', 'tool_name': tool_name})}\n\n"
+                
+                # Send final result
+                if "result" in event:
+                    yield f"data: {json.dumps({'type': 'done', 'result': event['result']})}\n\n"
+        
+        except Exception as stream_error:
+            logger.error(f"Error during streaming: {stream_error}")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Connection interrupted. Please try again.'})}\n\n"
+                
+    except StrandsUnavailableError as e:
+        logger.error(f"Strands unavailable: {e.message}")
+        error_response = format_error_response(e, user_friendly=True)
+        yield f"data: {json.dumps({'type': 'error', 'message': error_response['message']})}\n\n"
+    
     except Exception as e:
-        error_msg = f"Error processing command: {str(e)}"
-        yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
+        logger.error(f"Unexpected error in generate_response: {e}", exc_info=True)
+        yield f"data: {json.dumps({'type': 'error', 'message': 'An unexpected error occurred. Please try again.'})}\n\n"
 
 
 def build_system_prompt(game_state: dict) -> str:
@@ -127,6 +164,8 @@ async def process_command(request: CommandRequest):
     """
     Process a player command with streaming response.
     
+    Implements Requirements 11.3, 11.4: Error handling and retry logic
+    
     The response includes state changes that should be applied to the game state.
     
     State changes may include:
@@ -147,33 +186,110 @@ async def process_command(request: CommandRequest):
     Returns:
         StreamingResponse with Server-Sent Events
     """
+    # Validate command
     if not request.command or not request.command.strip():
-        raise HTTPException(status_code=400, detail="Command cannot be empty")
+        raise HTTPException(
+            status_code=400,
+            detail="Command cannot be empty. Try 'help' for assistance."
+        )
     
-    # Convert game_state dict to GameState object
+    # Convert game_state dict to GameState object with error handling
     try:
         game_state = GameState.from_dict(request.game_state)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid game state: {str(e)}")
+        logger.error(f"Invalid game state: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail="Your game state appears to be corrupted. You may need to start a new game."
+        )
     
     # Create command processor
-    processor = CommandProcessor(game_state)
-    
-    # Process command
     try:
-        result = await processor.process_command(request.command)
+        processor = CommandProcessor(game_state)
+    except Exception as e:
+        logger.error(f"Failed to create command processor: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to process commands right now. Please try again."
+        )
+    
+    # Process command with retry logic
+    @retry_with_backoff(
+        config=RetryConfig(max_attempts=2, initial_delay=0.5),
+        exceptions=(CommandProcessingError,)
+    )
+    async def process_with_retry():
+        try:
+            return await processor.process_command(request.command)
+        except Exception as e:
+            logger.error(f"Command processing failed: {e}")
+            raise CommandProcessingError(
+                "Failed to process command",
+                details={"command": request.command, "error": str(e)}
+            )
+    
+    try:
+        result = await process_with_retry()
+        
+        # Apply state changes to game state
+        if result.state_changes:
+            # Update player location
+            if 'player_location' in result.state_changes:
+                game_state.player_location = result.state_changes['player_location']
+            
+            # Update current door
+            if 'current_door' in result.state_changes:
+                game_state.current_door = result.state_changes['current_door']
+            
+            # Add new location to visited locations
+            if 'new_location_generated' in result.state_changes:
+                location_dict = result.state_changes['new_location_generated']
+                location = LocationData.from_dict(location_dict)
+                game_state.visited_locations[location.id] = location
+            
+            # Add items to inventory
+            if 'items_added' in result.state_changes:
+                for item_dict in result.state_changes['items_added']:
+                    item = Item.from_dict(item_dict)
+                    game_state.inventory.append(item)
+            
+            # Remove items from inventory
+            if 'items_removed' in result.state_changes:
+                for item_dict in result.state_changes['items_removed']:
+                    item_id = item_dict.get('id')
+                    game_state.inventory = [i for i in game_state.inventory if i.id != item_id]
+            
+            # Add key to keys_collected
+            if 'key_inserted' in result.state_changes:
+                key_num = result.state_changes['key_inserted']
+                if key_num not in game_state.keys_collected:
+                    game_state.keys_collected.append(key_num)
+            
+            # Add decision to history
+            if 'decision' in result.state_changes:
+                decision_dict = result.state_changes['decision']
+                decision = Decision.from_dict(decision_dict)
+                game_state.decision_history.append(decision)
+            
+            # Update last_updated timestamp
+            from datetime import datetime
+            game_state.last_updated = datetime.now()
         
         # Return result as streaming response
         async def generate_result():
-            # Send the message
-            yield f"data: {json.dumps({'type': 'text', 'content': result.message})}\n\n"
+            try:
+                # Send the message
+                yield f"data: {json.dumps({'type': 'text', 'content': result.message})}\n\n"
+                
+                # Send updated game state
+                yield f"data: {json.dumps({'type': 'state_changes', 'changes': game_state.to_dict()})}\n\n"
+                
+                # Send done signal
+                yield f"data: {json.dumps({'type': 'done', 'success': result.success})}\n\n"
             
-            # Send state changes if any
-            if result.state_changes:
-                yield f"data: {json.dumps({'type': 'state_changes', 'changes': result.state_changes})}\n\n"
-            
-            # Send done signal
-            yield f"data: {json.dumps({'type': 'done', 'success': result.success})}\n\n"
+            except Exception as e:
+                logger.error(f"Error generating result stream: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Error sending response. Please try again.'})}\n\n"
         
         return StreamingResponse(
             generate_result(),
@@ -184,5 +300,15 @@ async def process_command(request: CommandRequest):
                 "X-Accel-Buffering": "no"  # Disable nginx buffering
             }
         )
+    
+    except CommandProcessingError as e:
+        logger.error(f"Command processing error: {e.message}")
+        error_response = format_error_response(e, user_friendly=True)
+        raise HTTPException(status_code=500, detail=error_response['message'])
+    
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing command: {str(e)}")
+        logger.error(f"Unexpected error in process_command: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred. Please try again or start a new game if the problem persists."
+        )

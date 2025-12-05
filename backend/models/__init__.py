@@ -9,6 +9,10 @@ from .game_state import (
     Decision
 )
 
+from .share import (
+    ShareablePostcard
+)
+
 from .difficulty import (
     DIFFICULTY_CURVE,
     get_difficulty_settings,
@@ -41,6 +45,8 @@ __all__ = [
     'Interaction',
     'PuzzleState',
     'Decision',
+    # Share models
+    'ShareablePostcard',
     # Difficulty configuration
     'DIFFICULTY_CURVE',
     'get_difficulty_settings',

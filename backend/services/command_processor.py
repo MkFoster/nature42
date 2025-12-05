@@ -1,128 +1,36 @@
 """
 Command processing service for Nature42.
 
-This module handles parsing and executing player commands using AI-powered
-natural language understanding. It validates actions based on game context
-and provides helpful feedback for ambiguous or invalid commands.
+This module coordinates command parsing, validation, and execution by delegating
+to specialized handler modules.
 """
 
 import os
 import json
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass
+from typing import Dict, Any, Optional
 from datetime import datetime
 from dotenv import load_dotenv
 from strands import Agent
 from strands.models import BedrockModel
 
-from backend.models.game_state import GameState, Item, Decision, LocationData
+from backend.models.game_state import GameState, Decision, LocationData
+from backend.services.command_models import Intent, ValidationResult, ActionResult, CommandResult
+from backend.services.action_handlers import ActionHandlers
+from backend.services.door_handlers import DoorHandlers
 
 # Load environment variables from .env file
 load_dotenv()
 
-
-@dataclass
-class Intent:
-    """
-    Represents the parsed intent from a player command.
-    
-    Attributes:
-        action: The primary action (e.g., "move", "take", "examine", "talk")
-        target: The target of the action (e.g., "north", "key", "door")
-        is_ambiguous: Whether the command needs clarification
-        is_invalid: Whether the command is invalid
-        clarification_needed: What clarification is needed (if ambiguous)
-        suggestions: Suggested valid alternatives (if invalid)
-    """
-    action: str
-    target: Optional[str] = None
-    is_ambiguous: bool = False
-    is_invalid: bool = False
-    clarification_needed: Optional[str] = None
-    suggestions: List[str] = None
-    
-    def __post_init__(self):
-        if self.suggestions is None:
-            self.suggestions = []
-
-
-@dataclass
-class ValidationResult:
-    """
-    Result of validating an action against game context.
-    
-    Attributes:
-        is_valid: Whether the action can be performed
-        reason: Explanation of why action is valid/invalid
-        context_info: Additional context information
-    """
-    is_valid: bool
-    reason: str
-    context_info: Dict[str, Any] = None
-    
-    def __post_init__(self):
-        if self.context_info is None:
-            self.context_info = {}
-
-
-@dataclass
-class ActionResult:
-    """
-    Result of executing an action.
-    
-    Attributes:
-        success: Whether the action succeeded
-        message: Response message to player
-        state_changes: Changes to apply to game state
-        new_location: New location ID if player moved
-        items_added: Items added to inventory
-        items_removed: Items removed from inventory
-        decision: Significant decision to record (if any)
-    """
-    success: bool
-    message: str
-    state_changes: Dict[str, Any] = None
-    new_location: Optional[str] = None
-    items_added: List[Item] = None
-    items_removed: List[Item] = None
-    decision: Optional[Decision] = None
-    
-    def __post_init__(self):
-        if self.state_changes is None:
-            self.state_changes = {}
-        if self.items_added is None:
-            self.items_added = []
-        if self.items_removed is None:
-            self.items_removed = []
-
-
-@dataclass
-class CommandResult:
-    """
-    Complete result of processing a command.
-    
-    Attributes:
-        success: Whether command was successfully processed
-        message: Response message to player
-        state_changes: Changes to apply to game state
-        needs_clarification: Whether clarification is needed
-    """
-    success: bool
-    message: str
-    state_changes: Dict[str, Any] = None
-    needs_clarification: bool = False
-    
-    def __post_init__(self):
-        if self.state_changes is None:
-            self.state_changes = {}
+# Re-export models for backward compatibility
+__all__ = ['CommandProcessor', 'Intent', 'ValidationResult', 'ActionResult', 'CommandResult']
 
 
 class CommandProcessor:
     """
-    Processes natural language player commands.
+    Coordinates command processing by delegating to specialized handlers.
     
-    Uses Strands Agent SDK to parse commands, validate actions based on
-    game context, and execute actions with appropriate state updates.
+    Uses Strands Agent SDK to parse commands, validates actions based on
+    game context, and routes to appropriate handlers for execution.
     """
     
     def __init__(self, game_state: GameState):
@@ -133,6 +41,10 @@ class CommandProcessor:
             game_state: Current game state
         """
         self.game_state = game_state
+        
+        # Initialize handlers
+        self.action_handlers = ActionHandlers(game_state)
+        self.door_handlers = DoorHandlers(game_state)
         
         # Get model configuration from environment variables
         model_id = os.getenv("STRANDS_MODEL_ID", "anthropic.claude-sonnet-4-20250514-v1:0")
@@ -146,6 +58,58 @@ class CommandProcessor:
             temperature=0.3,  # Lower temperature for more consistent parsing
             max_tokens=2048
         )
+        
+        # Create a persistent agent for conversation management
+        # This agent maintains conversation history across commands
+        from strands.agent.conversation_manager import SlidingWindowConversationManager
+        
+        system_prompt = """You are a command parser for a text adventure game called Nature42.
+
+Your job is to parse player commands and maintain conversation context. You remember previous 
+interactions, so when a player says "yes" or "that one", you can refer back to what was 
+discussed earlier.
+
+When parsing commands, always respond with valid JSON containing the action and target.
+Be helpful and conversational when the player needs clarification."""
+        
+        self.conversation_agent = Agent(
+            model=self.model,
+            system_prompt=system_prompt,
+            conversation_manager=SlidingWindowConversationManager(
+                window_size=20,  # Keep last 20 messages for context
+                should_truncate_results=True
+            )
+        )
+        
+        # Restore conversation history from game state
+        self._restore_conversation_history()
+    
+    def _restore_conversation_history(self) -> None:
+        """
+        Restore conversation history from game state into the agent.
+        
+        This allows the agent to maintain context across HTTP requests by
+        loading previous messages from the persisted game state.
+        """
+        if not self.game_state.conversation_history:
+            return
+        
+        # Restore messages to the agent's conversation
+        # The conversation history is stored as a list of message dicts
+        for message in self.game_state.conversation_history:
+            # Messages are already in the format the agent expects
+            self.conversation_agent.messages.append(message)
+    
+    def _save_conversation_history(self) -> None:
+        """
+        Save current conversation history to game state.
+        
+        This persists the agent's conversation context so it can be restored
+        in future requests, enabling multi-turn conversations across HTTP requests.
+        """
+        # Save the agent's messages to game state
+        # Only keep the last 20 messages to avoid bloating the state
+        self.game_state.conversation_history = self.conversation_agent.messages[-20:]
     
     def apply_state_changes(self, state_changes: Dict[str, Any]) -> None:
         """
@@ -362,6 +326,9 @@ class CommandProcessor:
         if action_result.decision:
             state_changes['decision'] = action_result.decision.to_dict()
         
+        # Save conversation history to game state for persistence across requests
+        self._save_conversation_history()
+        
         return CommandResult(
             success=action_result.success,
             message=action_result.message,
@@ -372,6 +339,10 @@ class CommandProcessor:
         """
         Use AI to determine player intent from command (synchronous version).
         
+        Uses persistent conversation agent to maintain context across commands.
+        This allows the agent to remember previous interactions and provide
+        better responses to follow-up questions like "yes" or "that one".
+        
         Implements Property 1: Command parsing produces intent
         
         Args:
@@ -380,9 +351,9 @@ class CommandProcessor:
         Returns:
             Intent object with parsed action and target
         """
-        system_prompt = """You are a command parser for a text adventure game.
-
-Parse the player's command and extract:
+        # Build the parsing instruction as a user message
+        # The system prompt is set once on the persistent agent
+        parsing_instruction = f"""Parse the player's command and extract:
 1. The primary action (move, take, examine, use, talk, open, insert, etc.)
 2. The target of the action (if any)
 3. Whether the command is ambiguous and needs clarification
@@ -391,34 +362,43 @@ Parse the player's command and extract:
 Common actions:
 - Movement: go, move, walk, travel, enter, exit
 - Interaction: take, get, pick up, drop, put down, use, examine, look at, inspect
-- Communication: talk to, speak with, ask, tell
-- Game mechanics: open door, insert key, check inventory, get hint
+- Communication: talk to, speak with, ask, tell, say hello
+- Game mechanics: open door, insert key, check inventory, new game, start over
+- Help: help, ?, what do i do, how do i play, what can i do
+- Hint: hint, give me a hint, i'm stuck, clue
+
+IMPORTANT PARSING RULES:
+- For general help about commands, use action "help"
+- For hints about progressing in the game, use action "hint"
+- For starting a new game, use action "new_game"
+- Convert ordinal numbers to digits: "first" -> "1", "second" -> "2", "third" -> "3", etc.
+- For door references, extract the number: "the first door" -> "door 1", "door number 3" -> "door 3"
+- Simplify natural language: "the squirrel" -> "squirrel", "that rabbit" -> "rabbit"
 
 You MUST respond with ONLY valid JSON in this exact format:
-{
+{{
     "action": "primary_action",
     "target": "target_object_or_direction",
     "is_ambiguous": false,
     "is_invalid": false,
     "clarification_needed": null,
     "suggestions": []
-}
+}}
 
 Examples:
-- "go north" -> {"action": "move", "target": "north", "is_ambiguous": false, "is_invalid": false}
-- "take the key" -> {"action": "take", "target": "key", "is_ambiguous": false, "is_invalid": false}
-- "use it" -> {"action": "use", "target": null, "is_ambiguous": true, "clarification_needed": "What would you like to use?"}
-- "fly to the moon" -> {"action": "fly", "target": "moon", "is_invalid": true, "suggestions": ["go north", "go south", "examine area"]}
-"""
-        
-        agent = Agent(
-            model=self.model,
-            system_prompt=system_prompt
-        )
+- "go north" -> {{"action": "move", "target": "north", "is_ambiguous": false, "is_invalid": false}}
+- "take the key" -> {{"action": "take", "target": "key", "is_ambiguous": false, "is_invalid": false}}
+- "open the first door" -> {{"action": "open", "target": "door 1", "is_ambiguous": false, "is_invalid": false}}
+- "talk to the squirrel" -> {{"action": "talk", "target": "squirrel", "is_ambiguous": false, "is_invalid": false}}
+- "head down the path with the bridge" -> {{"action": "move", "target": "path with bridge", "is_ambiguous": false, "is_invalid": false}}
+- "use it" -> {{"action": "use", "target": null, "is_ambiguous": true, "clarification_needed": "What would you like to use?"}}
+- "fly to the moon" -> {{"action": "fly", "target": "moon", "is_invalid": true, "suggestions": ["go north", "go south", "examine area"]}}
+
+Player's command: {command}"""
         
         try:
-            # Use synchronous call - agent is directly callable
-            response = agent(f"Parse this command: {command}")
+            # Use the persistent conversation agent to maintain context
+            response = self.conversation_agent(parsing_instruction)
             
             # Extract text from AgentResult object
             response_text = str(response) if not isinstance(response, str) else response
@@ -546,6 +526,9 @@ Examples:
         
         Implements Requirement 12.1: Consider location when validating
         Implements Requirement 12.3: Explain why movement is invalid
+        
+        Note: We allow the action if there are ANY exits, and let the AI
+        handle semantic matching of the target to the actual exit names.
         """
         if not target:
             return ValidationResult(
@@ -554,34 +537,37 @@ Examples:
                 context_info=context_info
             )
         
-        # If we don't have location data yet, allow movement (will trigger generation)
-        if not current_location:
+        # Special handling for "back" or "return" commands
+        if target.lower() in ["back", "return", "clearing", "forest clearing", "exit"]:
             return ValidationResult(
                 is_valid=True,
-                reason="Movement to new area",
+                reason="Returning to previous location",
                 context_info=context_info
             )
         
-        # Check if exit exists in current location
-        if target.lower() not in [exit.lower() for exit in current_location.exits]:
-            available_exits = ", ".join(current_location.exits) if current_location.exits else "none"
-            
-            # Provide helpful explanation with context
-            reason = f"You can't go '{target}' from here."
-            if current_location.exits:
-                reason += f" Available exits are: {available_exits}."
-            else:
-                reason += " There don't appear to be any obvious exits."
-            
+        # If we don't have location data, player is in limbo - only allow "back"
+        if not current_location:
             return ValidationResult(
                 is_valid=False,
-                reason=reason,
+                reason="You can't move from here right now. Try 'back' or 'return to clearing' to go back.",
                 context_info=context_info
             )
+        
+        # Check if there are any exits at all
+        if not current_location.exits:
+            return ValidationResult(
+                is_valid=False,
+                reason="There don't appear to be any obvious exits from here. Try 'back' to return.",
+                context_info=context_info
+            )
+        
+        # If there are exits, allow the movement and let the AI handle semantic matching
+        # Add available exits to context for the AI to use
+        context_info['available_exits'] = current_location.exits
         
         return ValidationResult(
             is_valid=True, 
-            reason="Movement is valid",
+            reason="Movement is valid - AI will handle exit matching",
             context_info=context_info
         )
     
@@ -612,27 +598,22 @@ Examples:
                 context_info=context_info
             )
         
-        # Check if item exists in current location
-        item_names = [item.name.lower() for item in current_location.items]
-        if target.lower() not in item_names:
-            # Provide helpful feedback about what IS available
-            if current_location.items:
-                available_items = ", ".join(item.name for item in current_location.items)
-                reason = f"There is no '{target}' here. You can see: {available_items}."
-            else:
-                reason = f"There is no '{target}' here. In fact, there don't appear to be any items in this location."
-            
+        # Check if there are items in the location
+        # Let the AI handle semantic matching of the target name
+        if current_location.items:
+            # Add item list to context for the AI to use
+            context_info['available_items'] = [item.name for item in current_location.items]
             return ValidationResult(
-                is_valid=False,
-                reason=reason,
+                is_valid=True,
+                reason="Take action is valid - AI will handle item matching",
                 context_info=context_info
             )
-        
-        return ValidationResult(
-            is_valid=True, 
-            reason="Item can be taken",
-            context_info=context_info
-        )
+        else:
+            return ValidationResult(
+                is_valid=False,
+                reason=f"There is no '{target}' here. In fact, there don't appear to be any items in this location.",
+                context_info=context_info
+            )
     
     def _validate_drop_item(
         self,
@@ -840,6 +821,9 @@ Examples:
         
         Implements Requirement 12.1: Consider location
         Implements Requirement 8.1: NPC interactions
+        
+        Note: We don't do strict name matching here - the AI content generator
+        will handle semantic understanding of who the player wants to talk to.
         """
         if not target:
             # Check if there are any NPCs in the current location
@@ -857,21 +841,22 @@ Examples:
                     context_info=context_info
                 )
         
-        # Check if the target NPC exists in current location
-        if current_location:
-            npc_names = [npc.lower() for npc in current_location.npcs]
-            if target.lower() not in npc_names:
-                if current_location.npcs:
-                    npc_list = ", ".join(current_location.npcs)
-                    reason = f"There's no '{target}' here to talk to. NPCs here: {npc_list}."
-                else:
-                    reason = f"There's no '{target}' here to talk to. In fact, there's no one here at all."
-                
-                return ValidationResult(
-                    is_valid=False,
-                    reason=reason,
-                    context_info=context_info
-                )
+        # Check if there are any NPCs in the location
+        # Let the AI handle semantic matching of the target name
+        if current_location and current_location.npcs:
+            # Add NPC list to context for the AI to use
+            context_info['available_npcs'] = current_location.npcs
+            return ValidationResult(
+                is_valid=True,
+                reason="Talk action is valid - AI will handle NPC matching",
+                context_info=context_info
+            )
+        else:
+            return ValidationResult(
+                is_valid=False,
+                reason="There's no one here to talk to.",
+                context_info=context_info
+            )
         
         return ValidationResult(
             is_valid=True,
@@ -881,7 +866,7 @@ Examples:
     
     async def _execute_action(self, intent: Intent) -> ActionResult:
         """
-        Perform the action and update state.
+        Route action to appropriate handler.
         
         Args:
             intent: Validated intent to execute
@@ -892,28 +877,38 @@ Examples:
         action = intent.action
         target = intent.target
         
-        # Handle different action types
+        # Route to action handlers
         if action == "move":
-            return await self._handle_movement(target)
+            return await self.action_handlers.handle_movement(target)
         
         elif action == "take":
-            return await self._handle_take_item(target)
+            return await self.action_handlers.handle_take_item(target)
         
         elif action == "drop":
-            return await self._handle_drop_item(target)
+            return await self.action_handlers.handle_drop_item(target)
         
         elif action == "use":
-            return await self._handle_use_item(target)
+            return await self.action_handlers.handle_use_item(target)
         
         elif action in ["inventory", "check_inventory", "view_inventory"]:
-            return await self._handle_inventory()
+            return await self.action_handlers.handle_inventory()
         
         elif action == "examine":
-            return await self._handle_examine(target)
+            return await self.action_handlers.handle_examine(target)
         
+        elif action in ["help", "?", "what", "how"]:
+            return await self.action_handlers.handle_help()
+        
+        elif action == "hint":
+            return await self.action_handlers.handle_hint()
+        
+        elif action in ["talk", "speak"]:
+            return await self.action_handlers.handle_talk(target)
+        
+        # Route to door handlers
         elif action == "open":
             if target and "door" in target.lower():
-                return await self._handle_open_door(target)
+                return await self.door_handlers.handle_open_door(target)
             return ActionResult(
                 success=True,
                 message=f"You open the {target}. Nothing special happens."
@@ -921,502 +916,147 @@ Examples:
         
         elif action == "insert":
             if target and "key" in target.lower():
-                return await self._handle_insert_key()
+                return await self.door_handlers.handle_insert_key()
             return ActionResult(
                 success=False,
                 message="You can't insert that."
             )
         
-        # Default: generic response
-        return ActionResult(
-            success=True,
-            message=f"You {action} {target if target else ''}."
-        )
+        # Default: Use AI to handle any unrecognized actions
+        # This allows for creative interactions like "play the pacman game", "dance", etc.
+        return await self._handle_generic_action(action, target)
     
-    async def _handle_movement(self, direction: str) -> ActionResult:
+    async def _handle_generic_action(self, action: str, target: Optional[str]) -> ActionResult:
         """
-        Handle player movement between locations.
+        Handle any unrecognized action using AI.
         
-        Special handling for:
-        - Returning to forest clearing from door worlds
-        - Moving between locations within door worlds
-        - Generating new locations as needed
+        This allows players to interact creatively with the environment:
+        - "play the pacman game"
+        - "dance with the gnome"
+        - "press the red button"
+        - "activate the portal"
         
         Args:
-            direction: Direction or destination to move to
+            action: The action verb
+            target: The target of the action
             
         Returns:
-            ActionResult with new location
+            ActionResult with AI-generated response
         """
-        # Check for special movement commands
-        if direction.lower() in ["back", "return", "clearing", "forest clearing", "exit"]:
-            # Return to forest clearing
-            if self.game_state.current_door is not None:
-                return ActionResult(
-                    success=True,
-                    message="You step back through the door and return to the forest clearing. The six doors and central vault stand before you once more.",
-                    new_location="forest_clearing",
-                    state_changes={'current_door': None}
-                )
-            else:
-                return ActionResult(
-                    success=False,
-                    message="You're already in the forest clearing."
-                )
+        import os
+        from strands import Agent
+        from strands.models import BedrockModel
         
         # Get current location
         current_location = self.game_state.visited_locations.get(
             self.game_state.player_location
         )
         
-        # Check if the direction is a valid exit
-        if current_location and direction.lower() not in [exit.lower() for exit in current_location.exits]:
-            available_exits = ", ".join(current_location.exits) if current_location.exits else "none"
-            return ActionResult(
-                success=False,
-                message=f"You can't go '{direction}' from here. Available exits: {available_exits}."
-            )
-        
-        # Generate new location ID based on current location and direction
-        new_location_id = f"{self.game_state.player_location}_{direction.lower()}"
-        
-        # Check if we've already visited this location
-        if new_location_id in self.game_state.visited_locations:
-            cached_location = self.game_state.visited_locations[new_location_id]
-            return ActionResult(
-                success=True,
-                message=f"You move {direction}.\n\n{cached_location.description}",
-                new_location=new_location_id
-            )
-        
-        # Need to generate new location
-        # This will be handled by the content generator in the API layer
-        return ActionResult(
-            success=True,
-            message=f"You move {direction}...",
-            new_location=new_location_id,
-            state_changes={
-                'needs_location_generation': True,
-                'direction': direction
-            }
-        )
-    
-    async def _handle_take_item(self, item_name: str) -> ActionResult:
-        """
-        Handle taking an item from the current location.
-        
-        Implements Requirement 3.1: Add item to inventory
-        
-        Special handling for keys: When a player takes a key item,
-        it triggers the key retrieval logic which provides special
-        messaging and state tracking.
-        
-        Args:
-            item_name: Name of the item to take
-            
-        Returns:
-            ActionResult with item added to inventory
-        """
-        current_location = self.game_state.visited_locations.get(
-            self.game_state.player_location
-        )
-        
         if not current_location:
             return ActionResult(
-                success=False,
-                message="You can't take anything here."
-            )
-        
-        # Find the item
-        item_to_take = None
-        for item in current_location.items:
-            if item.name.lower() == item_name.lower():
-                item_to_take = item
-                break
-        
-        if not item_to_take:
-            return ActionResult(
-                success=False,
-                message=f"There is no {item_name} here."
-            )
-        
-        # Special handling for keys
-        if item_to_take.is_key and item_to_take.door_number:
-            # Use the key retrieval handler for special messaging
-            return await self._handle_retrieve_key(item_to_take.door_number)
-        
-        # Regular item
-        return ActionResult(
-            success=True,
-            message=f"You take the {item_to_take.name}.",
-            items_added=[item_to_take],
-            state_changes={'item_taken': item_to_take.id}
-        )
-    
-    async def _handle_drop_item(self, item_name: str) -> ActionResult:
-        """
-        Handle dropping an item from inventory.
-        
-        Implements Requirement 3.5: Remove item from inventory
-        """
-        # Find the item in inventory
-        item_to_drop = None
-        for item in self.game_state.inventory:
-            if item.name.lower() == item_name.lower():
-                item_to_drop = item
-                break
-        
-        if not item_to_drop:
-            return ActionResult(
-                success=False,
-                message=f"You don't have a {item_name}."
-            )
-        
-        return ActionResult(
-            success=True,
-            message=f"You drop the {item_to_drop.name}.",
-            items_removed=[item_to_drop]
-        )
-    
-    async def _handle_inventory(self) -> ActionResult:
-        """
-        Handle viewing inventory.
-        
-        Implements Requirement 3.3: Display all items in inventory
-        """
-        if not self.game_state.inventory:
-            return ActionResult(
                 success=True,
-                message="Your inventory is empty."
+                message=f"You try to {action} {target if target else 'something'}, but nothing happens."
             )
         
-        items_list = "\n".join(
-            f"- {item.name}: {item.description}"
-            for item in self.game_state.inventory
+        # Use AI to generate contextual response
+        model_id = os.getenv("STRANDS_MODEL_ID", "anthropic.claude-sonnet-4-20250514-v1:0")
+        region_name = os.getenv("AWS_REGION", "us-east-1")
+        
+        model = BedrockModel(
+            model_id=model_id,
+            region_name=region_name,
+            temperature=0.7,
+            max_tokens=1024
         )
         
-        return ActionResult(
-            success=True,
-            message=f"You are carrying:\n{items_list}"
-        )
-    
-    async def _handle_use_item(self, item_name: str) -> ActionResult:
-        """
-        Handle using an item from inventory.
+        inventory_list = "\n".join([f"- {item.name}" for item in self.game_state.inventory]) if self.game_state.inventory else "Empty"
         
-        Implements Requirement 3.4: Evaluate item usage in context
+        system_prompt = f"""You are the game master for Nature42. The player is trying an action.
+
+CURRENT LOCATION:
+{current_location.description}
+
+PLAYER'S INVENTORY:
+{inventory_list}
+
+GAME CONTEXT:
+- Keys collected: {len(self.game_state.keys_collected)}/6
+- Current door: {self.game_state.current_door if self.game_state.current_door else "Forest Clearing"}
+
+The player wants to: {action} {target if target else ''}
+
+Generate a creative, contextual response. If the action could progress the puzzle or reveal something important, describe that.
+If it's just a fun interaction, make it entertaining. If it doesn't make sense, explain why gently.
+Keep responses 2-3 paragraphs max."""
+
+        agent = Agent(model=model, system_prompt=system_prompt)
         
-        This method checks if the item can be used in the current context.
-        The actual effects of using the item depend on the item's properties
-        and the current game state.
-        
-        Args:
-            item_name: Name of the item to use
+        try:
+            # Run synchronously in executor
+            import asyncio
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: agent(f"Player action: {action} {target if target else ''}")
+            )
             
-        Returns:
-            ActionResult with success status and message
-        """
-        # Find the item in inventory
-        item_to_use = None
-        for item in self.game_state.inventory:
-            if item.name.lower() == item_name.lower():
-                item_to_use = item
-                break
-        
-        if not item_to_use:
-            return ActionResult(
-                success=False,
-                message=f"You don't have a {item_name} to use."
-            )
-        
-        # Check if it's a key - keys should be inserted, not used
-        if item_to_use.is_key:
-            return ActionResult(
-                success=False,
-                message=f"The {item_to_use.name} is meant to be inserted into the vault, not used directly. Try 'insert key into vault'."
-            )
-        
-        # Get current location for context
-        current_location = self.game_state.visited_locations.get(
-            self.game_state.player_location
-        )
-        
-        # Check item properties for usage hints
-        usage_context = item_to_use.properties.get('usage_context', 'general')
-        
-        # Basic usage logic - can be extended with AI evaluation
-        if usage_context == 'puzzle':
-            # Item is meant for puzzle solving
+            message = str(response).strip()
+            
             return ActionResult(
                 success=True,
-                message=f"You use the {item_to_use.name}. It seems to be important for solving a puzzle here.",
-                state_changes={'item_used': item_to_use.id}
+                message=message
             )
-        elif usage_context == 'tool':
-            # Item is a tool
-            return ActionResult(
-                success=True,
-                message=f"You use the {item_to_use.name}. It might come in handy.",
-                state_changes={'item_used': item_to_use.id}
-            )
-        else:
-            # Generic usage
-            return ActionResult(
-                success=True,
-                message=f"You use the {item_to_use.name}. {item_to_use.description}",
-                state_changes={'item_used': item_to_use.id}
-            )
-    
-    async def _handle_examine(self, target: Optional[str]) -> ActionResult:
-        """Handle examining objects or the environment."""
-        if not target:
-            # Examine current location
-            current_location = self.game_state.visited_locations.get(
-                self.game_state.player_location
-            )
-            if current_location:
+        except Exception as e:
+            # Fallback
+            if target:
                 return ActionResult(
                     success=True,
-                    message=current_location.description
+                    message=f"You {action} the {target}, but nothing happens."
                 )
-            return ActionResult(
-                success=True,
-                message="You look around but see nothing special."
-            )
-        
-        # Examine specific target
-        return ActionResult(
-            success=True,
-            message=f"You examine the {target}. It looks interesting."
-        )
-    
-    async def _handle_open_door(self, door_target: str) -> ActionResult:
-        """
-        Handle opening a door in the forest clearing.
-        
-        Implements Requirement 13.3: Generate world behind door
-        Implements Requirement 13.4: Create diverse settings
-        
-        This method:
-        1. Extracts the door number from the command
-        2. Checks if the world behind that door already exists
-        3. If not, generates a new world using the ContentGenerator
-        4. Moves the player into the door world
-        
-        Args:
-            door_target: The door target from the command (e.g., "door 1", "door three")
-            
-        Returns:
-            ActionResult with the new location and state changes
-        """
-        # Extract door number from target
-        door_number = None
-        number_words = ["one", "two", "three", "four", "five", "six"]
-        
-        for i in range(1, 7):
-            if str(i) in door_target or number_words[i-1] in door_target.lower():
-                door_number = i
-                break
-        
-        if not door_number:
-            return ActionResult(
-                success=False,
-                message="Which door would you like to open? (1-6)"
-            )
-        
-        # Check if door world already exists
-        door_world_key = f"door_{door_number}_entrance"
-        
-        if door_world_key in self.game_state.visited_locations:
-            # World already generated, just move player there
-            return ActionResult(
-                success=True,
-                message=f"You open door {door_number} and step through into the familiar world beyond.",
-                new_location=door_world_key,
-                state_changes={'current_door': door_number}
-            )
-        
-        # Generate new world for this door
-        from backend.services.content_generator import ContentGenerator
-        import asyncio
-        
-        generator = ContentGenerator()
-        
-        # Generate the entrance location for this door world
-        try:
-            # Run the async generation
-            loop = asyncio.get_event_loop()
-            location = await generator.generate_location(
-                door_number=door_number,
-                player_history=[d.to_dict() for d in self.game_state.decision_history],
-                keys_collected=len(self.game_state.keys_collected),
-                location_id=door_world_key
-            )
-            
-            # Build descriptive message about entering the new world
-            world_themes = [
-                "a mystical forest realm",
-                "an ancient library filled with forgotten knowledge",
-                "a twilight carnival with mysterious attractions",
-                "a steampunk city floating in the clouds",
-                "a haunted mansion on a stormy hill",
-                "a cosmic observatory at the edge of reality"
-            ]
-            
-            theme_desc = world_themes[door_number - 1] if door_number <= len(world_themes) else "a strange new world"
-            
-            message = f"""You open door {door_number} and step through...
-
-{location.description}
-
-You've entered {theme_desc}. Somewhere in this world lies the key you seek."""
-            
-            return ActionResult(
-                success=True,
-                message=message,
-                new_location=door_world_key,
-                state_changes={
-                    'current_door': door_number,
-                    'new_location_generated': location.to_dict(),
-                    'door_number': door_number
-                }
-            )
-            
-        except Exception as e:
-            # Fallback if generation fails
-            return ActionResult(
-                success=False,
-                message=f"The door creaks open, but something seems wrong. Try again. (Error: {str(e)})"
-            )
-    
-    async def _handle_retrieve_key(self, door_number: int) -> ActionResult:
-        """
-        Handle retrieving a key from a door world.
-        
-        Implements Requirement 13.2: Key retrieval from worlds
-        
-        This method is called when the player successfully completes the
-        objective in a door world and earns the key. The key is added to
-        their inventory and can later be inserted into the vault.
-        
-        Args:
-            door_number: Which door world the key is from (1-6)
-            
-        Returns:
-            ActionResult with key added to inventory and state changes
-        """
-        # Check if player already has this key
-        for item in self.game_state.inventory:
-            if item.is_key and item.door_number == door_number:
+            else:
                 return ActionResult(
                     success=False,
-                    message=f"You already have the key from door {door_number}."
+                    message=f"What would you like to {action}?"
                 )
-        
-        # Check if key was already collected and inserted
-        if door_number in self.game_state.keys_collected:
-            return ActionResult(
-                success=False,
-                message=f"You've already collected and inserted the key from door {door_number}."
-            )
-        
-        # Create the key item
-        key_item = Item(
-            id=f"key_{door_number}",
-            name=f"Key {door_number}",
-            description=f"A mystical key from the world behind door {door_number}. It glows with an otherworldly light.",
-            is_key=True,
-            door_number=door_number,
-            properties={
-                'door_number': door_number,
-                'obtained_at': self.game_state.player_location
-            }
-        )
-        
-        # Build congratulatory message
-        keys_after = len(self.game_state.keys_collected) + 1
-        remaining = 6 - keys_after
-        
-        message = f"""✨ You've obtained the key from door {door_number}! ✨
-
-The key materializes in your hand, pulsing with energy. You now have {keys_after} of 6 keys."""
-        
-        if remaining > 0:
-            message += f"\n\n{remaining} {'key' if remaining == 1 else 'keys'} remaining. Return to the forest clearing to insert this key into the vault, or continue exploring other doors."
-        else:
-            message += "\n\nYou have all six keys! Return to the forest clearing and insert them into the vault to complete your quest."
-        
-        return ActionResult(
-            success=True,
-            message=message,
-            items_added=[key_item],
-            state_changes={
-                'key_retrieved': door_number,
-                'keys_in_inventory': keys_after
-            }
-        )
+    
+    # Backward compatibility methods for tests
+    async def _handle_movement(self, direction: str) -> ActionResult:
+        """Backward compatibility wrapper."""
+        return await self.action_handlers.handle_movement(direction)
+    
+    async def _handle_take_item(self, item_name: str) -> ActionResult:
+        """Backward compatibility wrapper."""
+        return await self.action_handlers.handle_take_item(item_name)
+    
+    async def _handle_drop_item(self, item_name: str) -> ActionResult:
+        """Backward compatibility wrapper."""
+        return await self.action_handlers.handle_drop_item(item_name)
+    
+    async def _handle_inventory(self) -> ActionResult:
+        """Backward compatibility wrapper."""
+        return await self.action_handlers.handle_inventory()
+    
+    async def _handle_use_item(self, item_name: str) -> ActionResult:
+        """Backward compatibility wrapper."""
+        return await self.action_handlers.handle_use_item(item_name)
+    
+    async def _handle_examine(self, target: Optional[str]) -> ActionResult:
+        """Backward compatibility wrapper."""
+        return await self.action_handlers.handle_examine(target)
+    
+    async def _handle_help(self) -> ActionResult:
+        """Backward compatibility wrapper."""
+        return await self.action_handlers.handle_help()
+    
+    async def _handle_open_door(self, door_target: str) -> ActionResult:
+        """Backward compatibility wrapper."""
+        return await self.door_handlers.handle_open_door(door_target)
+    
+    async def _handle_retrieve_key(self, door_number: int) -> ActionResult:
+        """Backward compatibility wrapper."""
+        return await self.door_handlers.handle_retrieve_key(door_number)
     
     async def _handle_insert_key(self) -> ActionResult:
-        """
-        Handle inserting a key into the vault.
-        
-        Implements Requirement 13.5: Insert key into vault
-        Implements Requirement 13.6: Detect vault opening with all 6 keys
-        """
-        # Find a key in inventory
-        key_item = None
-        for item in self.game_state.inventory:
-            if item.is_key:
-                key_item = item
-                break
-        
-        if not key_item:
-            return ActionResult(
-                success=False,
-                message="You don't have any keys to insert."
-            )
-        
-        # Check if key already inserted
-        if key_item.door_number in self.game_state.keys_collected:
-            return ActionResult(
-                success=False,
-                message=f"You've already inserted the key from door {key_item.door_number}."
-            )
-        
-        # Calculate how many keys will be collected after this insertion
-        keys_after_insertion = len(self.game_state.keys_collected) + 1
-        
-        # Build message
-        if keys_after_insertion == 6:
-            # All keys collected - vault opens! (Requirement 13.6)
-            vault_message = f"""You insert the final key from door {key_item.door_number} into the vault.
-
-The vault glows with a soft light as all six keys align. With a satisfying click, the door swings open, revealing a single piece of parchment inside.
-
-You carefully unfold it and read:
-
-"If, instead of hunting for one giant, dramatic 'purpose,' you decided that a good human life is just a repeating pattern of six tiny daily habits—one moment of kindness, one of curiosity, one of courage, one of gratitude, one of play, and one of real, guilt-free rest—and you deliberately did each of those every single day of the week as your quiet offering to life, the universe, and everyone stuck on this spinning rock with you, then how many small, conscious choices would you be making in a week before the cosmos had to admit that, actually, you're doing a pretty excellent job of being alive?"
-
-Congratulations! You've completed Nature42 and discovered the meaning of 42."""
-            
-            return ActionResult(
-                success=True,
-                message=vault_message,
-                items_removed=[key_item],
-                state_changes={
-                    'key_inserted': key_item.door_number,
-                    'vault_opened': True,
-                    'game_completed': True
-                }
-            )
-        else:
-            # More keys needed
-            keys_remaining = 6 - keys_after_insertion
-            return ActionResult(
-                success=True,
-                message=f"You insert the key from door {key_item.door_number} into the vault. {keys_remaining} {'key' if keys_remaining == 1 else 'keys'} remaining.",
-                items_removed=[key_item],
-                state_changes={
-                    'key_inserted': key_item.door_number
-                }
-            )
+        """Backward compatibility wrapper."""
+        return await self.door_handlers.handle_insert_key()
+    

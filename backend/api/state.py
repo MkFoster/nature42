@@ -2,6 +2,8 @@
 State management API endpoints for Nature42.
 
 Handles game state retrieval, saving, and deletion.
+
+Implements Requirements 5.5, 11.4: Error handling for corrupted state
 """
 
 from fastapi import APIRouter, HTTPException
@@ -10,6 +12,11 @@ from pydantic import BaseModel
 from typing import Optional
 
 from backend.models import GameState
+from backend.utils.error_handling import (
+    StateValidationError,
+    format_error_response,
+    logger
+)
 
 router = APIRouter()
 
@@ -46,6 +53,8 @@ async def save_state(state: dict):
     """
     Save game state.
     
+    Implements Requirement 5.5: Handle corrupted storage gracefully
+    
     Note: In this implementation, state is managed client-side in browser storage.
     This endpoint validates the state structure but doesn't persist it server-side.
     
@@ -59,6 +68,19 @@ async def save_state(state: dict):
         # Validate state structure by attempting to deserialize
         game_state = GameState.from_dict(state)
         
+        # Additional validation checks
+        if not game_state.player_location:
+            raise StateValidationError(
+                "Invalid state: missing player location",
+                details={"state": state}
+            )
+        
+        if game_state.keys_collected and not all(1 <= k <= 6 for k in game_state.keys_collected):
+            raise StateValidationError(
+                "Invalid state: invalid key numbers",
+                details={"keys": game_state.keys_collected}
+            )
+        
         return JSONResponse(
             content={
                 "success": True,
@@ -66,10 +88,20 @@ async def save_state(state: dict):
                 "note": "State is managed client-side in browser storage"
             }
         )
-    except Exception as e:
+    
+    except StateValidationError as e:
+        logger.error(f"State validation error: {e.message}")
+        error_response = format_error_response(e, user_friendly=True)
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid state structure: {str(e)}"
+            detail=error_response['message']
+        )
+    
+    except Exception as e:
+        logger.error(f"Error validating state: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail="Your game state appears to be corrupted. You may need to start a new game."
         )
 
 
@@ -78,27 +110,39 @@ async def delete_state():
     """
     Delete game state (start new game).
     
+    Implements Requirement 5.5: Offer to start new game when state is corrupted
+    
     Note: In this implementation, state is managed client-side in browser storage.
     This endpoint provides a new game state template.
     
     Returns:
         JSON response with new game state
     """
-    new_state = GameState.create_new_game()
+    try:
+        new_state = GameState.create_new_game()
+        
+        return JSONResponse(
+            content={
+                "success": True,
+                "message": "New game state created",
+                "state": new_state.to_dict()
+            }
+        )
     
-    return JSONResponse(
-        content={
-            "success": True,
-            "message": "New game state created",
-            "state": new_state.to_dict()
-        }
-    )
+    except Exception as e:
+        logger.error(f"Error creating new game state: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to create new game. Please refresh the page and try again."
+        )
 
 
 @router.post("/api/state/validate")
 async def validate_state(state: dict):
     """
     Validate game state structure without saving.
+    
+    Implements Requirement 5.5: Detect corrupted state
     
     Args:
         state: Game state dictionary to validate
@@ -109,6 +153,29 @@ async def validate_state(state: dict):
     try:
         # Attempt to deserialize to validate structure
         game_state = GameState.from_dict(state)
+        
+        # Perform additional validation
+        validation_errors = []
+        
+        if not game_state.player_location:
+            validation_errors.append("Missing player location")
+        
+        if game_state.keys_collected and not all(1 <= k <= 6 for k in game_state.keys_collected):
+            validation_errors.append("Invalid key numbers")
+        
+        if len(game_state.keys_collected) > 6:
+            validation_errors.append("Too many keys collected")
+        
+        if validation_errors:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": True,
+                    "valid": False,
+                    "message": "State has validation errors",
+                    "errors": validation_errors
+                }
+            )
         
         return JSONResponse(
             content={
@@ -123,13 +190,16 @@ async def validate_state(state: dict):
                 }
             }
         )
+    
     except Exception as e:
+        logger.warning(f"State validation failed: {e}")
         return JSONResponse(
             status_code=200,  # Return 200 but indicate invalid
             content={
                 "success": True,
                 "valid": False,
                 "message": "State structure is invalid",
-                "error": str(e)
+                "error": str(e),
+                "recovery_suggestion": "Start a new game to continue playing"
             }
         )

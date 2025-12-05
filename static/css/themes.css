@@ -1,10 +1,175 @@
-/* Color themes - placeholder */
-.theme-amber {
-    background-color: #000;
-    color: #ffb000;
+/* Theme: Kiro Purple (Default) */
+body {
+    --terminal-bg: #000;
+    --terminal-fg: #a855ff;
+    --terminal-glow: #a855ff;
 }
 
-.theme-green {
-    background-color: #000;
-    color: #0f0;
+/* Theme: Amber */
+body.theme-amber {
+    --terminal-bg: #000;
+    --terminal-fg: #ffb000;
+    --terminal-glow: #ffb000;
+    color: var(--terminal-fg);
+}
+
+body.theme-amber #terminal-output,
+body.theme-amber #terminal-input {
+    color: var(--terminal-fg);
+}
+
+body.theme-amber #terminal-header,
+body.theme-amber #terminal-input-container,
+body.theme-amber #terminal-footer {
+    border-color: var(--terminal-fg);
+}
+
+body.theme-amber #location-image {
+    border-color: var(--terminal-fg);
+}
+
+body.theme-amber:not(.accessibility-mode) #terminal-output,
+body.theme-amber:not(.accessibility-mode) #terminal-input {
+    text-shadow: 0 0 5px var(--terminal-glow), 0 0 10px var(--terminal-glow);
+}
+
+/* Theme: White on Black */
+body.theme-white {
+    --terminal-bg: #000;
+    --terminal-fg: #fff;
+    --terminal-glow: #fff;
+    color: var(--terminal-fg);
+}
+
+body.theme-white #terminal-output,
+body.theme-white #terminal-input {
+    color: var(--terminal-fg);
+}
+
+body.theme-white #terminal-header,
+body.theme-white #terminal-input-container,
+body.theme-white #terminal-footer {
+    border-color: var(--terminal-fg);
+}
+
+body.theme-white #location-image {
+    border-color: var(--terminal-fg);
+}
+
+body.theme-white:not(.accessibility-mode) #terminal-output,
+body.theme-white:not(.accessibility-mode) #terminal-input {
+    text-shadow: 0 0 5px var(--terminal-glow), 0 0 10px var(--terminal-glow);
+}
+
+/* Theme: Blue */
+body.theme-blue {
+    --terminal-bg: #000;
+    --terminal-fg: #00ffff;
+    --terminal-glow: #00ffff;
+    color: var(--terminal-fg);
+}
+
+body.theme-blue #terminal-output,
+body.theme-blue #terminal-input {
+    color: var(--terminal-fg);
+}
+
+body.theme-blue #terminal-header,
+body.theme-blue #terminal-input-container,
+body.theme-blue #terminal-footer {
+    border-color: var(--terminal-fg);
+}
+
+body.theme-blue #location-image {
+    border-color: var(--terminal-fg);
+}
+
+body.theme-blue:not(.accessibility-mode) #terminal-output,
+body.theme-blue:not(.accessibility-mode) #terminal-input {
+    text-shadow: 0 0 5px var(--terminal-glow), 0 0 10px var(--terminal-glow);
+}
+
+/* Theme: Matrix (Bright Green) */
+body.theme-matrix {
+    --terminal-bg: #0d0208;
+    --terminal-fg: #00ff41;
+    --terminal-glow: #00ff41;
+    background-color: var(--terminal-bg);
+    color: var(--terminal-fg);
+}
+
+body.theme-matrix #terminal-output,
+body.theme-matrix #terminal-input {
+    color: var(--terminal-fg);
+}
+
+body.theme-matrix #terminal-header,
+body.theme-matrix #terminal-input-container,
+body.theme-matrix #terminal-footer {
+    border-color: var(--terminal-fg);
+}
+
+body.theme-matrix #location-image {
+    border-color: var(--terminal-fg);
+}
+
+body.theme-matrix:not(.accessibility-mode) #terminal-output,
+body.theme-matrix:not(.accessibility-mode) #terminal-input {
+    text-shadow: 0 0 5px var(--terminal-glow), 0 0 10px var(--terminal-glow);
+}
+
+/* Theme: Retro Orange */
+body.theme-orange {
+    --terminal-bg: #1a0f00;
+    --terminal-fg: #ff6600;
+    --terminal-glow: #ff6600;
+    background-color: var(--terminal-bg);
+    color: var(--terminal-fg);
+}
+
+body.theme-orange #terminal-output,
+body.theme-orange #terminal-input {
+    color: var(--terminal-fg);
+}
+
+body.theme-orange #terminal-header,
+body.theme-orange #terminal-input-container,
+body.theme-orange #terminal-footer {
+    border-color: var(--terminal-fg);
+}
+
+body.theme-orange #location-image {
+    border-color: var(--terminal-fg);
+}
+
+body.theme-orange:not(.accessibility-mode) #terminal-output,
+body.theme-orange:not(.accessibility-mode) #terminal-input {
+    text-shadow: 0 0 5px var(--terminal-glow), 0 0 10px var(--terminal-glow);
+}
+
+/* Theme Selector (can be added to UI later) */
+.theme-selector {
+    display: flex;
+    gap: 10px;
+    margin-left: 20px;
+}
+
+.theme-selector button {
+    background: transparent;
+    border: 1px solid currentColor;
+    color: inherit;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.85em;
+    transition: opacity 0.2s;
+}
+
+.theme-selector button:hover {
+    opacity: 0.7;
+}
+
+.theme-selector button.active {
+    background: currentColor;
+    color: #000;
 }

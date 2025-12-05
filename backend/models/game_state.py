@@ -159,6 +159,7 @@ class GameState:
     current_door: Optional[int]  # Which door world player is in (None = clearing)
     game_started_at: datetime
     last_updated: datetime
+    conversation_history: List[Dict[str, str]] = field(default_factory=list)  # AI conversation context
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -181,7 +182,8 @@ class GameState:
             'decision_history': [decision.to_dict() for decision in self.decision_history],
             'current_door': self.current_door,
             'game_started_at': self.game_started_at.isoformat(),
-            'last_updated': self.last_updated.isoformat()
+            'last_updated': self.last_updated.isoformat(),
+            'conversation_history': self.conversation_history
         }
 
     @classmethod
@@ -206,7 +208,8 @@ class GameState:
             decision_history=[Decision.from_dict(decision) for decision in data['decision_history']],
             current_door=data['current_door'],
             game_started_at=datetime.fromisoformat(data['game_started_at']),
-            last_updated=datetime.fromisoformat(data['last_updated'])
+            last_updated=datetime.fromisoformat(data['last_updated']),
+            conversation_history=data.get('conversation_history', [])
         )
 
     def to_json(self) -> str:
@@ -221,13 +224,26 @@ class GameState:
 
     @classmethod
     def create_new_game(cls) -> 'GameState':
-        """Create a new game state with default values."""
+        """
+        Create a new game state with default values.
+        
+        Implements Requirement 13.1: Place player in forest clearing with 6 doors and vault
+        
+        The game always starts in the forest clearing, which is automatically
+        initialized with its static location data.
+        """
+        from backend.services.forest_clearing import create_forest_clearing
+        
         now = datetime.now()
+        
+        # Create the forest clearing location
+        clearing = create_forest_clearing()
+        
         return cls(
             player_location="forest_clearing",
             inventory=[],
             keys_collected=[],
-            visited_locations={},
+            visited_locations={"forest_clearing": clearing},
             npc_interactions={},
             puzzle_states={},
             decision_history=[],

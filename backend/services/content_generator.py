@@ -3,6 +3,8 @@ Content generation service using Strands Agent SDK.
 
 This module handles AI-driven content generation for locations, NPCs,
 puzzles, and other dynamic game elements.
+
+Implements Requirements 11.3, 11.4: Error handling and retry logic
 """
 
 import os
@@ -18,6 +20,14 @@ from backend.models import (
     get_difficulty_settings,
     get_random_references
 )
+from backend.utils.error_handling import (
+    ContentGenerationError,
+    StrandsUnavailableError,
+    retry_with_backoff,
+    RetryConfig,
+    GracefulDegradation,
+    logger
+)
 
 
 class ContentGenerator:
@@ -30,18 +40,29 @@ class ContentGenerator:
     """
     
     def __init__(self):
-        """Initialize the content generator with Bedrock model."""
+        """
+        Initialize the content generator with Bedrock model.
+        
+        Implements Requirement 11.3: Handle Strands SDK unavailability
+        """
         # Get model configuration from environment
         model_id = os.getenv("STRANDS_MODEL_ID", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
         temperature = float(os.getenv("STRANDS_TEMPERATURE", "0.7"))
         max_tokens = int(os.getenv("STRANDS_MAX_TOKENS", "4096"))
         
         # Create Bedrock model with creative settings for narrative generation
-        self.model = BedrockModel(
-            model_id=model_id,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
+        try:
+            self.model = BedrockModel(
+                model_id=model_id,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize Bedrock model: {e}")
+            raise StrandsUnavailableError(
+                "Unable to initialize AI service",
+                details={"error": str(e)}
+            )
         
         # Content filtering guidelines
         self.age_rating = "13+"
@@ -198,8 +219,21 @@ STYLE:
 - Mysterious yet humorous tone
 - Include these pop culture references naturally: {', '.join(pop_refs)}
 - Create at least 2 exits/paths
-- Describe items, NPCs, or puzzles present
 - Age-appropriate for 13+ audience
+
+CRITICAL RULES:
+1. If you mention ANY object in the description that could be picked up or interacted with, 
+   you MUST include it in the "items" array. Players will try to interact with things you describe!
+   
+2. If you mention ANY character, creature, or NPC in the description that could be talked to,
+   you MUST include them in the "npcs" array. Players will try to talk to anyone you mention!
+
+Examples:
+- If you mention "a glowing crystal" in the description, add it to items
+- If you mention "a Cabbage Patch Kid doll", add it to items
+- If you mention "a cheerful gnome", add "A cheerful gnome in a tie-dye vest" to npcs
+- If you mention "a wise rabbit", add "Thumper the Wise Rabbit" to npcs
+- If you mention "a squirrel", add "A peculiar squirrel with intelligent eyes" to npcs
 
 You MUST respond with ONLY valid JSON in this exact format:
 {{
@@ -207,20 +241,53 @@ You MUST respond with ONLY valid JSON in this exact format:
     "description": "Detailed description (2-3 paragraphs)",
     "exits": ["exit1", "exit2"],
     "items": [
-        {{"id": "item1", "name": "Item Name", "description": "Item description"}}
+        {{"id": "unique_id", "name": "Item Name", "description": "What it looks like"}}
     ],
-    "npcs": ["npc1", "npc2"]
-}}"""
+    "npcs": ["NPC Name 1", "NPC Name 2"]
+}}
+
+IMPORTANT: Every character/creature mentioned in the description MUST appear in the npcs array!"""
         
         agent = self._create_agent(system_prompt)
         
         # Generate location
         prompt = f"Generate a unique fantasy location for door {door_number}."
         
-        # Run synchronous agent call in executor for async context
+        # Run synchronous agent call in executor for async context with retry logic
         import asyncio
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, agent, prompt)
+        
+        @retry_with_backoff(
+            config=RetryConfig(max_attempts=3, initial_delay=1.0),
+            exceptions=(Exception,)
+        )
+        async def call_agent_with_retry():
+            try:
+                loop = asyncio.get_event_loop()
+                return await loop.run_in_executor(None, agent, prompt)
+            except Exception as e:
+                logger.error(f"Agent call failed for location generation: {e}")
+                raise ContentGenerationError(
+                    "Failed to generate location",
+                    details={"door_number": door_number, "error": str(e)}
+                )
+        
+        try:
+            response = await call_agent_with_retry()
+        except ContentGenerationError as e:
+            logger.error(f"All retries failed for location generation: {e.message}")
+            # Use graceful degradation
+            fallback_desc = GracefulDegradation.get_fallback_location_description(
+                location_id or f"door_{door_number}"
+            )
+            return LocationData(
+                id=location_id or f"door_{door_number}_fallback",
+                description=fallback_desc,
+                image_url="",
+                exits=["north", "south", "back"],
+                items=[],
+                npcs=[],
+                generated_at=datetime.now()
+            )
         
         # Parse JSON response
         try:
