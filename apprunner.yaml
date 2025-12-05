@@ -24,7 +24,7 @@ run:
     - name: STRANDS_MODEL_PROVIDER
       value: "bedrock"
     - name: STRANDS_MODEL_ID
-      value: "anthropic.claude-sonnet-4-20250514-v1:0"
+      value: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
     - name: STRANDS_TEMPERATURE
       value: "0.7"
     - name: STRANDS_MAX_TOKENS
