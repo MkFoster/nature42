@@ -76,8 +76,7 @@ Be helpful and conversational when the player needs clarification."""
             model=self.model,
             system_prompt=system_prompt,
             conversation_manager=SlidingWindowConversationManager(
-                window_size=20,  # Keep last 20 messages for context
-                should_truncate_results=True
+                window_size=20  # Keep last 20 messages for context
             )
         )
         

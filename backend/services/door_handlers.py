@@ -164,26 +164,32 @@ You've entered {theme_desc}. Somewhere in this world lies the key you seek."""
             }
         )
         
-        # Build congratulatory message
+        # Build congratulatory message with teleport
         keys_after = len(self.game_state.keys_collected) + 1
         remaining = 6 - keys_after
         
         message = f"""✨ You've obtained the key from door {door_number}! ✨
 
-The key materializes in your hand, pulsing with energy. You now have {keys_after} of 6 keys."""
+The key materializes in your hand, pulsing with energy. You now have {keys_after} of 6 keys.
+
+A brilliant flash of light surrounds you, and you feel yourself being pulled through space...
+
+You find yourself back in the forest clearing. The six doors stand before you, and the vault awaits in the center."""
         
         if remaining > 0:
-            message += f"\n\n{remaining} {'key' if remaining == 1 else 'keys'} remaining. Return to the forest clearing to insert this key into the vault, or continue exploring other doors."
+            message += f"\n\n{remaining} {'key' if remaining == 1 else 'keys'} remaining. You can insert this key into the vault now, or explore other doors to find more keys."
         else:
-            message += "\n\nYou have all six keys! Return to the forest clearing and insert them into the vault to complete your quest."
+            message += "\n\nYou have all six keys! Insert them into the vault to complete your quest."
         
         return ActionResult(
             success=True,
             message=message,
             items_added=[key_item],
+            new_location="forest_clearing",
             state_changes={
                 'key_retrieved': door_number,
-                'keys_in_inventory': keys_after
+                'keys_in_inventory': keys_after,
+                'current_door': None  # Clear current door since we're back in clearing
             }
         )
     
