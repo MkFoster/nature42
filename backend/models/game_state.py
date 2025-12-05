@@ -160,6 +160,7 @@ class GameState:
     game_started_at: datetime
     last_updated: datetime
     conversation_history: List[Dict[str, str]] = field(default_factory=list)  # AI conversation context
+    debug_mode: bool = False  # Debug mode flag
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -183,7 +184,8 @@ class GameState:
             'current_door': self.current_door,
             'game_started_at': self.game_started_at.isoformat(),
             'last_updated': self.last_updated.isoformat(),
-            'conversation_history': self.conversation_history
+            'conversation_history': self.conversation_history,
+            'debug_mode': self.debug_mode
         }
 
     @classmethod
@@ -209,7 +211,8 @@ class GameState:
             current_door=data['current_door'],
             game_started_at=datetime.fromisoformat(data['game_started_at']),
             last_updated=datetime.fromisoformat(data['last_updated']),
-            conversation_history=data.get('conversation_history', [])
+            conversation_history=data.get('conversation_history', []),
+            debug_mode=data.get('debug_mode', False)
         )
 
     def to_json(self) -> str:

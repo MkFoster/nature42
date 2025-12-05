@@ -110,6 +110,78 @@ Be helpful and conversational when the player needs clarification."""
         # Only keep the last 20 messages to avoid bloating the state
         self.game_state.conversation_history = self.conversation_agent.messages[-20:]
     
+    async def _handle_debug_mode(self) -> CommandResult:
+        """
+        Handle debug mode activation.
+        
+        Places all 6 keys just inside each doorway for easy testing of key retrieval
+        and teleportation mechanics.
+        """
+        from backend.models.game_state import Item, LocationData
+        from datetime import datetime
+        
+        # Enable debug mode
+        self.game_state.debug_mode = True
+        
+        # Create simple debug locations for each door with the key right there
+        for door_num in range(1, 7):
+            location_id = f"debug_door_{door_num}"
+            
+            # Create the key item for this door
+            key = Item(
+                id=f"debug_key_{door_num}",
+                name=f"Key #{door_num}",
+                description=f"The key from Door {door_num} (DEBUG MODE)",
+                is_key=True,
+                door_number=door_num
+            )
+            
+            # Create a simple location with the key visible
+            debug_location = LocationData(
+                id=location_id,
+                description=f"""🔧 DEBUG LOCATION - DOOR {door_num} 🔧
+
+You step through Door {door_num} into a simple test chamber. Right in front of you, sitting on a pedestal, is Key #{door_num}.
+
+This is a debug location for testing key retrieval and teleportation mechanics.
+
+Available exits: back to clearing""",
+                image_url="",
+                exits=["back", "clearing", "return"],
+                items=[key],
+                npcs=[],
+                generated_at=datetime.now()
+            )
+            
+            # Add this location to visited locations
+            self.game_state.visited_locations[location_id] = debug_location
+        
+        # Build state changes
+        state_changes = {
+            'debug_mode': True,
+            'debug_locations_created': [f"debug_door_{i}" for i in range(1, 7)]
+        }
+        
+        message = """🔧 DEBUG MODE ACTIVATED 🔧
+
+All 6 doors now lead to simple test chambers with keys visible on pedestals.
+
+To test the game mechanics:
+1. Open any door (1-6)
+2. Take the key from the pedestal
+3. Verify you're teleported back to the clearing
+4. Verify the key is in your inventory
+5. Insert the key into the vault
+6. Repeat for all 6 doors
+
+This lets you test the full key retrieval → teleportation → insertion flow!"""
+        
+        return CommandResult(
+            success=True,
+            message=message,
+            state_changes=state_changes
+        )
+    
     def apply_state_changes(self, state_changes: Dict[str, Any]) -> None:
         """
         Apply state changes to the game state.
@@ -155,11 +227,17 @@ Be helpful and conversational when the player needs clarification."""
             decision = Decision.from_dict(state_changes['decision'])
             self.game_state.decision_history.append(decision)
         
-        # Track key insertion
+        # Track key insertion (single key - backward compatibility)
         if 'key_inserted' in state_changes:
             key_num = state_changes['key_inserted']
             if key_num not in self.game_state.keys_collected:
                 self.game_state.keys_collected.append(key_num)
+        
+        # Track multiple key insertions
+        if 'keys_inserted' in state_changes:
+            for key_num in state_changes['keys_inserted']:
+                if key_num not in self.game_state.keys_collected:
+                    self.game_state.keys_collected.append(key_num)
         
         # Add new location to visited locations
         if 'new_location_generated' in state_changes:
@@ -238,6 +316,13 @@ Be helpful and conversational when the player needs clarification."""
                 key_num = action_result.state_changes['key_inserted']
                 consequences.append(f"Inserted key {key_num} into vault")
             
+            if 'keys_inserted' in action_result.state_changes:
+                key_nums = action_result.state_changes['keys_inserted']
+                if len(key_nums) == 1:
+                    consequences.append(f"Inserted key {key_nums[0]} into vault")
+                else:
+                    consequences.append(f"Inserted {len(key_nums)} keys into vault")
+            
             if 'vault_opened' in action_result.state_changes:
                 consequences.append("Opened the vault and completed the game")
             
@@ -267,6 +352,10 @@ Be helpful and conversational when the player needs clarification."""
             CommandResult with success status, message, and state changes
         """
         import asyncio
+        
+        # Check for debug command
+        if command.strip() == "debug8472":
+            return await self._handle_debug_mode()
         
         # Parse the command to determine intent (run sync function in executor)
         loop = asyncio.get_event_loop()
@@ -978,22 +1067,60 @@ GAME CONTEXT:
 
 The player wants to: {action} {target if target else ''}
 
-Generate a creative, contextual response. If the action could progress the puzzle or reveal something important, describe that.
+Generate a creative, contextual response. If the action could progress the puzzle or reveal the key, describe that.
 If it's just a fun interaction, make it entertaining. If it doesn't make sense, explain why gently.
-Keep responses 2-3 paragraphs max."""
+
+Respond with JSON in this format:
+{{
+    "message": "Your narrative response (2-3 paragraphs max)",
+    "key_found": true/false
+}}
+
+Set key_found to true ONLY if this action directly reveals or obtains the key for this door world."""
 
         agent = Agent(model=model, system_prompt=system_prompt)
         
         try:
             # Run synchronously in executor
             import asyncio
+            import json
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None,
                 lambda: agent(f"Player action: {action} {target if target else ''}")
             )
             
-            message = str(response).strip()
+            response_text = str(response).strip()
+            
+            # Extract JSON
+            if "```" in response_text:
+                lines = response_text.split("\n")
+                response_text = "\n".join([l for l in lines if not l.strip().startswith("```")])
+            
+            try:
+                result = json.loads(response_text)
+                message = result.get("message", response_text)
+                key_found = result.get("key_found", False)
+            except json.JSONDecodeError:
+                # Fallback if JSON parsing fails
+                message = response_text
+                key_found = False
+            
+            # If key was found, trigger retrieval
+            if key_found and self.game_state.current_door and self.game_state.current_door not in self.game_state.keys_collected:
+                from backend.services.door_handlers import DoorHandlers
+                door_handlers = DoorHandlers(self.game_state)
+                key_result = await door_handlers.handle_retrieve_key(self.game_state.current_door)
+                
+                # Combine the AI's discovery message with the key retrieval
+                combined_message = f"{message}\n\n{key_result.message}"
+                
+                return ActionResult(
+                    success=True,
+                    message=combined_message,
+                    new_location=key_result.new_location,
+                    state_changes=key_result.state_changes
+                )
             
             return ActionResult(
                 success=True,

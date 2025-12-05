@@ -227,6 +227,10 @@ CRITICAL RULES:
 2. If you mention ANY character, creature, or NPC in the description that could be talked to,
    you MUST include them in the "npcs" array. Players will try to talk to anyone you mention!
 
+3. DO NOT use the words "vault" or "key" in generated content. The only vault is the central 
+   vault in the forest clearing, and the only keys are the 6 special door keys. Use alternative 
+   terms like: chest, box, container, token, artifact, crystal, gem, medallion, relic, etc.
+
 Examples:
 - If you mention "a glowing crystal" in the description, add it to items
 - If you mention "a Cabbage Patch Kid doll", add it to items
@@ -397,6 +401,10 @@ PERSONALITY:
 - Provide helpful hints when appropriate
 - Stay in character
 - Reference the player's journey if it's relevant to the conversation
+
+IMPORTANT: Do NOT use the words "vault" or "key" unless specifically referring to the 
+central vault or the 6 special door keys. Use alternative terms like: chest, box, 
+container, token, artifact, crystal, gem, medallion, relic, etc.
 
 Respond to the player's action naturally and in character."""
         

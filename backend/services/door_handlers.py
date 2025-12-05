@@ -55,6 +55,17 @@ class DoorHandlers:
                 message="Which door would you like to open? (1-6)"
             )
         
+        # Check for debug mode - use debug locations if available
+        if self.game_state.debug_mode:
+            debug_location_key = f"debug_door_{door_number}"
+            if debug_location_key in self.game_state.visited_locations:
+                return ActionResult(
+                    success=True,
+                    message=f"🔧 DEBUG: Opening door {door_number}...\n\n{self.game_state.visited_locations[debug_location_key].description}",
+                    new_location=debug_location_key,
+                    state_changes={'current_door': door_number}
+                )
+        
         # Check if door world already exists
         door_world_key = f"door_{door_number}_entrance"
         
@@ -165,12 +176,17 @@ You've entered {theme_desc}. Somewhere in this world lies the key you seek."""
         )
         
         # Build congratulatory message with teleport
-        keys_after = len(self.game_state.keys_collected) + 1
-        remaining = 6 - keys_after
+        # Count keys currently in inventory (not yet inserted)
+        keys_in_inventory = sum(1 for item in self.game_state.inventory if item.is_key)
+        # Count keys already inserted into vault
+        keys_inserted = len(self.game_state.keys_collected)
+        # Total keys obtained (including this new one)
+        total_keys = keys_in_inventory + keys_inserted + 1
+        remaining = 6 - total_keys
         
         message = f"""✨ You've obtained the key from door {door_number}! ✨
 
-The key materializes in your hand, pulsing with energy. You now have {keys_after} of 6 keys.
+The key materializes in your hand, pulsing with energy. You now have {total_keys} of 6 keys.
 
 A brilliant flash of light surrounds you, and you feel yourself being pulled through space...
 
@@ -188,72 +204,84 @@ You find yourself back in the forest clearing. The six doors stand before you, a
             new_location="forest_clearing",
             state_changes={
                 'key_retrieved': door_number,
-                'keys_in_inventory': keys_after,
+                'keys_in_inventory': total_keys,
                 'current_door': None  # Clear current door since we're back in clearing
             }
         )
     
     async def handle_insert_key(self) -> ActionResult:
         """
-        Handle inserting a key into the vault.
+        Handle inserting key(s) into the vault.
+        
+        If player has multiple keys, inserts all of them at once.
         
         Implements Requirement 13.5: Insert key into vault
         Implements Requirement 13.6: Detect vault opening with all 6 keys
         """
-        # Find a key in inventory
-        key_item = None
+        # Find all keys in inventory that haven't been inserted yet
+        keys_to_insert = []
         for item in self.game_state.inventory:
-            if item.is_key:
-                key_item = item
-                break
+            if item.is_key and item.door_number not in self.game_state.keys_collected:
+                keys_to_insert.append(item)
         
-        if not key_item:
+        if not keys_to_insert:
             return ActionResult(
                 success=False,
                 message="You don't have any keys to insert."
             )
         
-        # Check if key already inserted
-        if key_item.door_number in self.game_state.keys_collected:
-            return ActionResult(
-                success=False,
-                message=f"You've already inserted the key from door {key_item.door_number}."
-            )
+        # Insert all keys
+        keys_inserted_count = len(keys_to_insert)
+        keys_after_insertion = len(self.game_state.keys_collected) + keys_inserted_count
         
-        # Calculate how many keys will be collected after this insertion
-        keys_after_insertion = len(self.game_state.keys_collected) + 1
+        # Build message based on how many keys are being inserted
+        if keys_inserted_count == 1:
+            key_item = keys_to_insert[0]
+            insertion_text = f"You insert the key from door {key_item.door_number} into the vault."
+        else:
+            door_numbers = sorted([k.door_number for k in keys_to_insert])
+            door_list = ", ".join([f"#{n}" for n in door_numbers])
+            insertion_text = f"You insert {keys_inserted_count} keys into the vault (doors {door_list})."
         
-        # Build message
+        # Check if vault opens
         if keys_after_insertion == 6:
             # All keys collected - vault opens! (Requirement 13.6)
-            vault_message = f"""You insert the final key from door {key_item.door_number} into the vault.
+            vault_message = f"""{insertion_text}
 
 The vault glows with a soft light as all six keys align. With a satisfying click, the door swings open, revealing a single piece of parchment inside.
 
 You carefully unfold it and read:
 
-"If, instead of hunting for one giant, dramatic 'purpose,' you decided that a good human life is just a repeating pattern of six tiny daily habits—one moment of kindness, one of curiosity, one of courage, one of gratitude, one of play, and one of real, guilt-free rest—and you deliberately did each of those every single day of the week as your quiet offering to life, the universe, and everyone stuck on this spinning rock with you, then how many small, conscious choices would you be making in a week before the cosmos had to admit that, actually, you're doing a pretty excellent job of being alive?"
+"If, instead of hunting for one giant, dramatic "purpose," you decided that a good human life is just a repeating pattern of six tiny daily habits—one moment of kindness, one of curiosity, one of courage, one of gratitude, one of play, and one of real, guilt-free rest—and you deliberately did each of those every single day of the week as your quiet offering to life, the universe, and everyone stuck on this spinning rock with you, then how many small, conscious choices would you be making in a week before the cosmos had to admit that, actually, you're doing a pretty excellent job of being alive?"
 
 Congratulations! You've completed Nature42 and discovered the meaning of 42."""
+            
+            # Build state changes for all keys
+            state_changes = {
+                'keys_inserted': [k.door_number for k in keys_to_insert],
+                'vault_opened': True,
+                'game_completed': True
+            }
             
             return ActionResult(
                 success=True,
                 message=vault_message,
-                items_removed=[key_item],
-                state_changes={
-                    'key_inserted': key_item.door_number,
-                    'vault_opened': True,
-                    'game_completed': True
-                }
+                items_removed=keys_to_insert,
+                state_changes=state_changes
             )
         else:
             # More keys needed
             keys_remaining = 6 - keys_after_insertion
+            message = f"{insertion_text} {keys_remaining} {'key' if keys_remaining == 1 else 'keys'} remaining."
+            
+            # Build state changes for all keys
+            state_changes = {
+                'keys_inserted': [k.door_number for k in keys_to_insert]
+            }
+            
             return ActionResult(
                 success=True,
-                message=f"You insert the key from door {key_item.door_number} into the vault. {keys_remaining} {'key' if keys_remaining == 1 else 'keys'} remaining.",
-                items_removed=[key_item],
-                state_changes={
-                    'key_inserted': key_item.door_number
-                }
+                message=message,
+                items_removed=keys_to_insert,
+                state_changes=state_changes
             )

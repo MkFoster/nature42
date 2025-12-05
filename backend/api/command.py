@@ -259,11 +259,17 @@ async def process_command(request: CommandRequest):
                     item_id = item_dict.get('id')
                     game_state.inventory = [i for i in game_state.inventory if i.id != item_id]
             
-            # Add key to keys_collected
+            # Add key to keys_collected (single key - backward compatibility)
             if 'key_inserted' in result.state_changes:
                 key_num = result.state_changes['key_inserted']
                 if key_num not in game_state.keys_collected:
                     game_state.keys_collected.append(key_num)
+            
+            # Add multiple keys to keys_collected
+            if 'keys_inserted' in result.state_changes:
+                for key_num in result.state_changes['keys_inserted']:
+                    if key_num not in game_state.keys_collected:
+                        game_state.keys_collected.append(key_num)
             
             # Add decision to history
             if 'decision' in result.state_changes:

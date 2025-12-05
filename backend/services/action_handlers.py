@@ -451,21 +451,61 @@ Match this to an item in their inventory (use semantic understanding - "watch" m
 Then describe what happens when they use it in this context.
 
 If it's a key, remind them to insert it into the vault instead.
-If using the item reveals something important or progresses the puzzle, describe that.
-Be creative and contextual. Keep responses 2-3 paragraphs max."""
+If using the item reveals the key or progresses the puzzle significantly, describe that.
+Be creative and contextual.
+
+Respond with JSON in this format:
+{{
+    "message": "Your narrative response (2-3 paragraphs max)",
+    "key_found": true/false
+}}
+
+Set key_found to true ONLY if using this item directly reveals or obtains the key for this door world."""
 
         agent = Agent(model=model, system_prompt=system_prompt)
         
         try:
             # Run synchronously in executor
             import asyncio
+            import json
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None,
                 lambda: agent(f"Player uses: {item_name}")
             )
             
-            message = str(response).strip()
+            response_text = str(response).strip()
+            
+            # Extract JSON
+            if "```" in response_text:
+                lines = response_text.split("\n")
+                response_text = "\n".join([l for l in lines if not l.strip().startswith("```")])
+            
+            try:
+                result = json.loads(response_text)
+                message = result.get("message", response_text)
+                key_found = result.get("key_found", False)
+            except json.JSONDecodeError:
+                # Fallback if JSON parsing fails
+                message = response_text
+                key_found = False
+            
+            # If key was found, trigger retrieval
+            if key_found and self.game_state.current_door and self.game_state.current_door not in self.game_state.keys_collected:
+                from backend.services.door_handlers import DoorHandlers
+                door_handlers = DoorHandlers(self.game_state)
+                key_result = await door_handlers.handle_retrieve_key(self.game_state.current_door)
+                
+                # Combine the AI's discovery message with the key retrieval
+                combined_message = f"{message}\n\n{key_result.message}"
+                
+                return ActionResult(
+                    success=True,
+                    message=combined_message,
+                    new_location=key_result.new_location,
+                    state_changes=key_result.state_changes,
+                    items_added=key_result.items_added
+                )
             
             return ActionResult(
                 success=True,

@@ -99,7 +99,9 @@ Six empty keyholes are arranged in a circle on the vault's face, numbered 1 thro
 {keys_collected} {plural} glow softly in their keyholes, while {remaining} {remaining_plural} remain empty. The vault is still locked, waiting for all six keys."""
     
     else:  # keys_collected == 6
-        return """The stone vault sits in the center of the clearing, all six keys glowing brilliantly in their keyholes. The vault is open, revealing the parchment inside with its philosophical message about the meaning of 42.
+        return """The stone vault sits in the center of the clearing, all six keys glowing brilliantly in their keyholes.
+
+The vault door stands open, revealing the parchment inside. The philosophical message about the meaning of 42 awaits those who read it.
 
 Your quest is complete."""
 
