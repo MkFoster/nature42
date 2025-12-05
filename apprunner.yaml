@@ -1,5 +1,5 @@
 version: 1.0
-runtime: python3.11
+runtime: python311
 build:
   commands:
     pre-build:
@@ -17,3 +17,11 @@ run:
       value: "8080"
     - name: PYTHONUNBUFFERED
       value: "1"
+    - name: AWS_REGION
+      value: "us-east-1"
+    - name: STRANDS_MODEL_ID
+      value: "anthropic.claude-sonnet-4-20250514-v1:0"
+    - name: STRANDS_TEMPERATURE
+      value: "0.7"
+    - name: STRANDS_MAX_TOKENS
+      value: "4096"

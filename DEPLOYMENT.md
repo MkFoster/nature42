@@ -9,22 +9,24 @@
 
 ## Environment Variables
 
-Configure the following environment variables in App Runner:
+Most configuration is in `apprunner.yaml`. For AWS credentials, App Runner uses IAM roles:
 
-### Required for Development
-- `AWS_BEDROCK_API_KEY`: Bedrock API key (30-day expiration)
-  - Generate from: Bedrock Console → API keys
+### AWS Credentials (Automatic via IAM)
+App Runner will automatically use the IAM role you assign to the service. No need to set:
+- ~~`AWS_ACCESS_KEY_ID`~~ (handled by IAM role)
+- ~~`AWS_SECRET_ACCESS_KEY`~~ (handled by IAM role)
+- `AWS_REGION`: Set in `apprunner.yaml` (default: us-east-1)
 
-### Required for Production
-- `AWS_ACCESS_KEY_ID`: IAM access key
-- `AWS_SECRET_ACCESS_KEY`: IAM secret key
-- `AWS_REGION`: AWS region (e.g., `us-west-2`)
+### Configuration (in apprunner.yaml)
+- `PORT`: Application port (8080)
+- `STRANDS_MODEL_ID`: Bedrock model ID
+- `STRANDS_TEMPERATURE`: Model temperature (0.7)
+- `STRANDS_MAX_TOKENS`: Max tokens per response (4096)
 
-### Optional Configuration
-- `PORT`: Application port (default: 8080)
-- `STRANDS_MODEL_ID`: Bedrock model ID (default: `anthropic.claude-sonnet-4-20250514-v1:0`)
-- `STRANDS_TEMPERATURE`: Model temperature (default: 0.7)
-- `STRANDS_MAX_TOKENS`: Max tokens per response (default: 4096)
+### Optional Override (if needed)
+If you need to override any values, you can add them in App Runner Console:
+- After creating the service, go to: Configuration → Edit
+- Add custom environment variables in the "Environment variables" section
 
 ## Deployment Steps
 
@@ -37,10 +39,11 @@ Configure the following environment variables in App Runner:
    - Choose "Python 3.11" runtime
    - App Runner will automatically detect `apprunner.yaml`
 
-3. **Configure environment variables**:
-   - In service settings, add required environment variables
-   - For development: Add `AWS_BEDROCK_API_KEY`
-   - For production: Add IAM credentials
+3. **Configure IAM permissions**:
+   - During service creation, App Runner will ask for an "Instance role"
+   - Create a new role or select existing role with these permissions:
+     - `AmazonBedrockFullAccess` (or custom policy with `bedrock:InvokeModel`)
+   - This allows the app to call Bedrock without hardcoded credentials
 
 4. **Deploy**:
    - App Runner will build and deploy automatically
